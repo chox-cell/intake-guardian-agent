@@ -10,7 +10,8 @@
     "start": "node dist/server.js",
     "db:init": "node dist/scripts/db-init.js",
     "smoke": "bash scripts/smoke.sh",
-    "lint:types": "tsc -p tsconfig.json --noEmit"
+    "lint:types": "tsc -p tsconfig.json --noEmit",
+    "smoke:day5": "bash scripts/smoke-day5.sh"
   },
   "dependencies": {
     "better-sqlite3": "^11.8.1",
