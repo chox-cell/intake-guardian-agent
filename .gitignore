@@ -1,0 +1,8 @@
+
+# Local junk / backups
+.tmp_backups/
+*.bak.*
+*.log
+data/
+node_modules/
+.DS_Store
