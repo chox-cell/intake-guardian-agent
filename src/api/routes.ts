@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { Store } from "../store/store.js";
 import { createAgent } from "../plugin/createAgent.js";
+import { requireTenantKey } from "./tenant-key.js";
 
 export function makeRoutes(args: {
   store: Store;
@@ -20,14 +21,20 @@ export function makeRoutes(args: {
     res.json({ ok: true });
   });
 
-  // Core intake (generic) — expects InboundEvent contract
+  // Core intake (generic) — expects InboundEvent contract with tenantId in body
   r.post("/intake", async (req, res) => {
+    const tenantId = z.string().min(1).parse(req.body?.tenantId);
+    const tk = requireTenantKey(req, tenantId);
+    if (!tk.ok) return res.status(tk.status).json({ ok: false, error: tk.error });
+
     const out = await agent.intake(req.body);
     res.json(out);
   });
 
   r.get("/workitems", async (req, res) => {
     const tenantId = z.string().min(1).parse(req.query.tenantId);
+    const tk = requireTenantKey(req, tenantId);
+    if (!tk.ok) return res.status(tk.status).json({ ok: false, error: tk.error });
 
     const status = req.query.status
       ? z.enum(["new", "triage", "in_progress", "waiting", "resolved", "closed"]).parse(req.query.status)
@@ -49,16 +56,20 @@ export function makeRoutes(args: {
 
   r.get("/workitems/:id", async (req, res) => {
     const tenantId = z.string().min(1).parse(req.query.tenantId);
-    const item = await args.store.getWorkItem(tenantId, req.params.id);
+    const tk = requireTenantKey(req, tenantId);
+    if (!tk.ok) return res.status(tk.status).json({ ok: false, error: tk.error });
 
+    const item = await args.store.getWorkItem(tenantId, req.params.id);
     if (!item) return res.status(404).json({ ok: false, error: "not_found" });
     res.json({ ok: true, item });
   });
 
   r.post("/workitems/:id/status", async (req, res) => {
     const tenantId = z.string().min(1).parse(req.body.tenantId);
-    const next = req.body.next;
+    const tk = requireTenantKey(req, tenantId);
+    if (!tk.ok) return res.status(tk.status).json({ ok: false, error: tk.error });
 
+    const next = req.body.next;
     const out = await agent.updateStatus(tenantId, req.params.id, next);
 
     if (!out.ok && (out as any).error === "not_found") return res.status(404).json(out);
@@ -69,8 +80,10 @@ export function makeRoutes(args: {
 
   r.post("/workitems/:id/owner", async (req, res) => {
     const tenantId = z.string().min(1).parse(req.body.tenantId);
-    const ownerId = req.body.ownerId ?? null;
+    const tk = requireTenantKey(req, tenantId);
+    if (!tk.ok) return res.status(tk.status).json({ ok: false, error: tk.error });
 
+    const ownerId = req.body.ownerId ?? null;
     const out = await agent.assignOwner(tenantId, req.params.id, ownerId);
 
     if (!out.ok && (out as any).error === "not_found") return res.status(404).json(out);
@@ -79,6 +92,9 @@ export function makeRoutes(args: {
 
   r.get("/workitems/:id/events", async (req, res) => {
     const tenantId = z.string().min(1).parse(req.query.tenantId);
+    const tk = requireTenantKey(req, tenantId);
+    if (!tk.ok) return res.status(tk.status).json({ ok: false, error: tk.error });
+
     const limit = req.query.limit
       ? z.coerce.number().int().min(1).max(1000).parse(req.query.limit)
       : 200;

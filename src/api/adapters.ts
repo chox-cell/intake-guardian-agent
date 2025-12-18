@@ -9,6 +9,7 @@ import { verifyResendWebhook } from "./verify-resend.js";
 import { verifyWhatsAppSignature, verifyWhatsAppMessageAge } from "./verify-whatsapp.js";
 import type { RawBodyRequest } from "./raw-body.js";
 import { makeRateLimiter } from "./rate-limit.js";
+import { requireTenantKey } from "./tenant-key.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
@@ -31,6 +32,8 @@ export function makeAdapterRoutes(args: {
   // --- Resend webhook (JSON) ---
   r.post("/email/resend", async (req, res) => {
     const tenantId = z.string().min(1).parse(req.query.tenantId);
+    const tk = requireTenantKey(req, tenantId);
+    if (!tk.ok) return res.status(tk.status).json({ ok: false, error: tk.error });
 
     const v = verifyResendWebhook(req as RawBodyRequest);
     if (!v.ok) return res.status(401).json({ ok: false, error: v.error });
@@ -43,6 +46,8 @@ export function makeAdapterRoutes(args: {
   // --- SendGrid inbound parse (multipart/form-data) ---
   r.post("/email/sendgrid", upload.any(), async (req, res) => {
     const tenantId = z.string().min(1).parse(req.query.tenantId);
+    const tk = requireTenantKey(req, tenantId);
+    if (!tk.ok) return res.status(tk.status).json({ ok: false, error: tk.error });
 
     const body = req.body || {};
     const from = String(body.from || "").trim();
@@ -75,6 +80,7 @@ export function makeAdapterRoutes(args: {
   });
 
   // --- WhatsApp Cloud verify (GET) ---
+  // NOTE: Meta verification request won't include x-tenant-key; allow GET verify without tenant key.
   r.get("/whatsapp/cloud", async (req, res) => {
     const mode = String(req.query["hub.mode"] || "");
     const token = String(req.query["hub.verify_token"] || "");
@@ -89,6 +95,8 @@ export function makeAdapterRoutes(args: {
   // --- WhatsApp Cloud messages (POST) ---
   r.post("/whatsapp/cloud", async (req, res) => {
     const tenantId = z.string().min(1).parse(req.query.tenantId);
+    const tk = requireTenantKey(req, tenantId);
+    if (!tk.ok) return res.status(tk.status).json({ ok: false, error: tk.error });
 
     const sig = verifyWhatsAppSignature(req as RawBodyRequest);
     if (!sig.ok) return res.status(401).json({ ok: false, error: sig.error });
