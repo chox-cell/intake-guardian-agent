@@ -6,17 +6,9 @@ import { createAgent } from "../plugin/createAgent.js";
 import { resendToInboundEvent } from "../adapters/email-resend.js";
 import { whatsappCloudToInboundEvent } from "../adapters/whatsapp-cloud.js";
 import { verifyResendWebhook } from "./verify-resend.js";
-import { verifyWhatsAppSignature } from "./verify-whatsapp.js";
+import { verifyWhatsAppSignature, verifyWhatsAppMessageAge } from "./verify-whatsapp.js";
 import type { RawBodyRequest } from "./raw-body.js";
-
-/**
- * Adapter endpoints:
- * Transform provider payload -> InboundEvent -> agent.intake()
- * Hardening (optional):
- * - Resend signature via Svix headers
- * - WhatsApp signature via X-Hub-Signature-256
- * - SendGrid inbound parse multipart/form-data
- */
+import { makeRateLimiter } from "./rate-limit.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
@@ -33,13 +25,15 @@ export function makeAdapterRoutes(args: {
     dedupeWindowSeconds: args.dedupeWindowSeconds
   });
 
+  // Global rate-limit for adapters
+  r.use(makeRateLimiter());
+
   // --- Resend webhook (JSON) ---
-  // Requires raw body to verify signatures (optional)
   r.post("/email/resend", async (req, res) => {
     const tenantId = z.string().min(1).parse(req.query.tenantId);
 
     const v = verifyResendWebhook(req as RawBodyRequest);
-    if (!v.ok) return res.status(400).json({ ok: false, error: v.error });
+    if (!v.ok) return res.status(401).json({ ok: false, error: v.error });
 
     const ev = resendToInboundEvent({ tenantId, body: req.body });
     const out = await agent.intake(ev);
@@ -47,7 +41,6 @@ export function makeAdapterRoutes(args: {
   });
 
   // --- SendGrid inbound parse (multipart/form-data) ---
-  // Twilio docs: inbound parse POSTs multipart/form-data.  [oai_citation:4‡Twilio](https://www.twilio.com/docs/sendgrid/for-developers/parsing-email/setting-up-the-inbound-parse-webhook?utm_source=chatgpt.com)
   r.post("/email/sendgrid", upload.any(), async (req, res) => {
     const tenantId = z.string().min(1).parse(req.query.tenantId);
 
@@ -66,10 +59,14 @@ export function makeAdapterRoutes(args: {
       body: content,
       meta: {
         provider: "sendgrid",
-        // attachments info is in req.files (kept minimal in v1)
-        attachments: Array.isArray((req as any).files) ? (req as any).files.map((f: any) => ({
-          fieldname: f.fieldname, originalname: f.originalname, mimetype: f.mimetype, size: f.size
-        })) : []
+        attachments: Array.isArray((req as any).files)
+          ? (req as any).files.map((f: any) => ({
+              fieldname: f.fieldname,
+              originalname: f.originalname,
+              mimetype: f.mimetype,
+              size: f.size
+            }))
+          : []
       },
       receivedAt: new Date().toISOString()
     });
@@ -93,8 +90,11 @@ export function makeAdapterRoutes(args: {
   r.post("/whatsapp/cloud", async (req, res) => {
     const tenantId = z.string().min(1).parse(req.query.tenantId);
 
-    const v = verifyWhatsAppSignature(req as RawBodyRequest);
-    if (!v.ok) return res.status(400).json({ ok: false, error: v.error });
+    const sig = verifyWhatsAppSignature(req as RawBodyRequest);
+    if (!sig.ok) return res.status(401).json({ ok: false, error: sig.error });
+
+    const age = verifyWhatsAppMessageAge(req.body);
+    if (!age.ok) return res.status(400).json({ ok: false, error: age.error });
 
     const ev = whatsappCloudToInboundEvent({ tenantId, body: req.body });
     if (!ev) return res.json({ ok: true, ignored: true });
