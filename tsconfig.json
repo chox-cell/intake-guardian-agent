@@ -8,5 +8,13 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true
-  }
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    "build",
+    "__bak_*",
+    "__bak_salespack_*",
+    "**/*.bak.*"
+  ]
 }
