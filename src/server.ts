@@ -1,17 +1,19 @@
 import fs from "fs";
 import path from "path";
 
-// Load env (.env.local preferred) for portable dev/prod
 import dotenv from "dotenv";
 dotenv.config({ path: path.resolve(process.cwd(), ".env.local") });
 dotenv.config({ path: path.resolve(process.cwd(), ".env") });
 
 import express from "express";
 import pino from "pino";
+
 import { makeRoutes } from "./api/routes.js";
 import { makeAdapterRoutes } from "./api/adapters.js";
+import { makeOutboundRoutes } from "./api/outbound.js";
 import { captureRawBody } from "./api/raw-body.js";
 import { FileStore } from "./store/file.js";
+import { TenantsStore } from "./tenants/store.js";
 
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 
@@ -23,6 +25,7 @@ const WA_VERIFY_TOKEN = process.env.WA_VERIFY_TOKEN || "";
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 const store = new FileStore(path.resolve(DATA_DIR));
+const tenants = new TenantsStore({ dataDir: DATA_DIR });
 
 async function main() {
   await store.init();
@@ -32,6 +35,7 @@ async function main() {
   app.use(express.urlencoded({ extended: true, limit: "512kb", verify: captureRawBody as any }));
 
   app.use("/api", makeRoutes({ store, presetId: PRESET_ID, dedupeWindowSeconds: DEDUPE_WINDOW_SECONDS }));
+
   app.use(
     "/api/adapters",
     makeAdapterRoutes({
@@ -42,6 +46,9 @@ async function main() {
     })
   );
 
+  // V3 sales pack routes
+  app.use("/api", makeOutboundRoutes({ store, tenants }));
+
   app.listen(PORT, () => {
     log.info(
       {
@@ -49,7 +56,10 @@ async function main() {
         DATA_DIR,
         PRESET_ID,
         DEDUPE_WINDOW_SECONDS,
-        TENANT_KEYS_CONFIGURED: Boolean((process.env.TENANT_KEYS_JSON || "").trim())
+        TENANT_KEYS_CONFIGURED: Boolean((process.env.TENANT_KEYS_JSON || "").trim()) || tenants.list().length > 0,
+        SLACK_CONFIGURED: Boolean((process.env.SLACK_WEBHOOK_URL || "").trim()),
+        ADMIN_KEY_CONFIGURED: Boolean((process.env.ADMIN_KEY || "").trim()),
+        SMTP_CONFIGURED: Boolean((process.env.SMTP_HOST || "").trim())
       },
       "Intake-Guardian Agent running (FileStore)"
     );
