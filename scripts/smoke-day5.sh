@@ -16,7 +16,9 @@ need curl
 need jq
 need date
 
-SUBJECT_UNIQ="smoke-tenantkeys-$(date +%s)"
+TS="$(date +%s)"
+SUBJECT_UNIQ="smoke-tenantkeys-$TS"
+BODY_UNIQ="VPN is down ASAP. Cannot access network. smoke_ts=$TS"
 
 echo "==> Smoke Day-5 (with Tenant Keys)"
 echo "BASE_URL=$BASE_URL"
@@ -34,7 +36,7 @@ else
 fi
 echo
 
-# 2) Tenant key gate (expect 401/403 WITHOUT key) ONLY meaningful if keys configured in server env
+# 2) Tenant key gate (expect 401/403 without key)
 echo "==> [2] Tenant key gate (expect 401/403 without x-tenant-key)"
 HTTP_CODE="$(curl -sS -o /tmp/ig_tmp.json -w "%{http_code}" "$BASE_URL/api/workitems?tenantId=$TENANT&limit=1" || true)"
 if [ "$HTTP_CODE" = "401" ] || [ "$HTTP_CODE" = "403" ]; then
@@ -42,7 +44,7 @@ if [ "$HTTP_CODE" = "401" ] || [ "$HTTP_CODE" = "403" ]; then
 else
   echo "http=$HTTP_CODE body:"
   cat /tmp/ig_tmp.json || true
-  bad "tenant gate NOT enforced (expected 401/403). TIP: ensure TENANT_KEYS_JSON is loaded via .env.local/.env and restart."
+  bad "tenant gate NOT enforced (expected 401/403)"
 fi
 echo
 
@@ -52,7 +54,7 @@ RESP1="$(curl -fsS "$BASE_URL/api/adapters/email/sendgrid?tenantId=$TENANT" \
   -H "x-tenant-key: $TENANT_KEY" \
   -F 'from=employee@corp.local' \
   -F "subject=$SUBJECT_UNIQ" \
-  -F 'text=VPN is down ASAP. Cannot access network.' )"
+  -F "text=$BODY_UNIQ" )"
 
 if echo "$RESP1" | jq -e '.ok == true and (.workItem.id | length) > 5' >/dev/null; then
   WID="$(echo "$RESP1" | jq -r '.workItem.id')"
@@ -75,13 +77,13 @@ else
 fi
 echo
 
-# 5) Dedupe check (send same unique subject again => duplicated should be true)
+# 5) Dedupe check (send same subject+body again => duplicated should be true)
 echo "==> [5] Dedupe: same payload again => duplicated=true"
 RESP3="$(curl -fsS "$BASE_URL/api/adapters/email/sendgrid?tenantId=$TENANT" \
   -H "x-tenant-key: $TENANT_KEY" \
   -F 'from=employee@corp.local' \
   -F "subject=$SUBJECT_UNIQ" \
-  -F 'text=VPN is down ASAP. Cannot access network.' )"
+  -F "text=$BODY_UNIQ" )"
 
 if echo "$RESP3" | jq -e '.ok == true and .duplicated == true' >/dev/null; then
   ok "dedupe ok (duplicated=true)"
@@ -120,29 +122,6 @@ else
   echo "==> [6/7] Skipped (no workItemId captured)"
   echo
 fi
-
-# 8) Rate-limit burst (may trigger depending on settings)
-echo "==> [8] Rate-limit burst (may PASS even if not triggered)"
-RATE_LIMIT_HIT=0
-for i in $(seq 1 80); do
-  R="$(curl -sS "$BASE_URL/api/adapters/email/sendgrid?tenantId=$TENANT" \
-    -H "x-tenant-key: $TENANT_KEY" \
-    -F 'from=employee@corp.local' \
-    -F "subject=burst-$SUBJECT_UNIQ-$i" \
-    -F 'text=hello' || true)"
-
-  if echo "$R" | jq -e '.error == "rate_limited"' >/dev/null 2>&1; then
-    RATE_LIMIT_HIT=1
-    break
-  fi
-done
-
-if [ "$RATE_LIMIT_HIT" -eq 1 ]; then
-  ok "rate-limit triggered (rate_limited)"
-else
-  ok "rate-limit not triggered (limits may be high)"
-fi
-echo
 
 echo "==> Summary"
 echo "PASS=$PASS"
