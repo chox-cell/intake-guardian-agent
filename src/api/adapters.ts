@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { TenantsStore } from "../tenants/store.js";
 import { z } from "zod";
 import multer from "multer";
 import { Store } from "../store/store.js";
@@ -14,6 +15,7 @@ import { requireTenantKey } from "./tenant-key.js";
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 export function makeAdapterRoutes(args: {
+  tenants?: TenantsStore;
   store: Store;
   presetId: string;
   dedupeWindowSeconds: number;
@@ -32,7 +34,7 @@ export function makeAdapterRoutes(args: {
   // --- Resend webhook (JSON) ---
   r.post("/email/resend", async (req, res) => {
     const tenantId = z.string().min(1).parse(req.query.tenantId);
-    const tk = requireTenantKey(req, tenantId);
+    const tk = requireTenantKey(req, tenantId, args.tenants);
     if (!tk.ok) return res.status(tk.status).json({ ok: false, error: tk.error });
 
     const v = verifyResendWebhook(req as RawBodyRequest);
@@ -46,7 +48,7 @@ export function makeAdapterRoutes(args: {
   // --- SendGrid inbound parse (multipart/form-data) ---
   r.post("/email/sendgrid", upload.any(), async (req, res) => {
     const tenantId = z.string().min(1).parse(req.query.tenantId);
-    const tk = requireTenantKey(req, tenantId);
+    const tk = requireTenantKey(req, tenantId, args.tenants);
     if (!tk.ok) return res.status(tk.status).json({ ok: false, error: tk.error });
 
     const body = req.body || {};
@@ -95,7 +97,7 @@ export function makeAdapterRoutes(args: {
   // --- WhatsApp Cloud messages (POST) ---
   r.post("/whatsapp/cloud", async (req, res) => {
     const tenantId = z.string().min(1).parse(req.query.tenantId);
-    const tk = requireTenantKey(req, tenantId);
+    const tk = requireTenantKey(req, tenantId, args.tenants);
     if (!tk.ok) return res.status(tk.status).json({ ok: false, error: tk.error });
 
     const sig = verifyWhatsAppSignature(req as RawBodyRequest);
