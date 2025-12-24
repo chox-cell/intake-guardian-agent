@@ -11,8 +11,10 @@ import pino from "pino";
 import { makeRoutes } from "./api/routes.js";
 import { makeAdapterRoutes } from "./api/adapters.js";
 import { makeOutboundRoutes } from "./api/outbound.js";
+import { makeUiRoutes } from "./api/ui.js";
 import { captureRawBody } from "./api/raw-body.js";
 import { FileStore } from "./store/file.js";
+import { ResendMailer } from "./lib/resend.js";
 import { TenantsStore } from "./tenants/store.js";
 
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
@@ -22,11 +24,22 @@ const DATA_DIR = process.env.DATA_DIR || "./data";
 const PRESET_ID = process.env.PRESET_ID || "it_support.v1";
 const DEDUPE_WINDOW_SECONDS = Number(process.env.DEDUPE_WINDOW_SECONDS || 86400);
 const WA_VERIFY_TOKEN = process.env.WA_VERIFY_TOKEN || "";
+const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
+const RESEND_FROM = process.env.RESEND_FROM || "";
+const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || "http://127.0.0.1:7090";
+const RESEND_DRY_RUN = process.env.RESEND_DRY_RUN === "1";
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 const store = new FileStore(path.resolve(DATA_DIR));
 const tenants = new TenantsStore({ dataDir: DATA_DIR });
 
+
+const mailer = new ResendMailer({
+  apiKey: RESEND_API_KEY,
+  from: RESEND_FROM,
+  publicBaseUrl: PUBLIC_BASE_URL,
+  dryRun: RESEND_DRY_RUN
+});
 async function main() {
   await store.init();
 
@@ -36,16 +49,25 @@ async function main() {
 
   app.use("/api", makeRoutes({ store, presetId: PRESET_ID, dedupeWindowSeconds: DEDUPE_WINDOW_SECONDS }));
 
+  
   app.use(
     "/api/adapters",
     makeAdapterRoutes({
       store,
+      tenants,
       presetId: PRESET_ID,
       dedupeWindowSeconds: DEDUPE_WINDOW_SECONDS,
-      waVerifyToken: WA_VERIFY_TOKEN || undefined
+      waVerifyToken: WA_VERIFY_TOKEN || undefined,
+      mailer,
+      publicBaseUrl: PUBLIC_BASE_URL
     })
   );
 
+
+
+
+  // Simple HTML UI (MVP)
+  app.use("/ui", makeUiRoutes({ store, tenants }));
   // V3 sales pack routes
   app.use("/api", makeOutboundRoutes({ store, tenants }));
 
