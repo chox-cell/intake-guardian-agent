@@ -27,7 +27,7 @@ const WA_VERIFY_TOKEN = (process.env.WA_VERIFY_TOKEN || "").trim() || undefined;
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
 const store = new FileStore(path.resolve(DATA_DIR));
-const tenants = new TenantsStore(path.resolve(DATA_DIR, "tenants.json"));
+const tenants = new TenantsStore({ dataDir: path.resolve(DATA_DIR) });
 
 async function main() {
   await store.init();
