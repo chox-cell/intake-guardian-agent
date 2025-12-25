@@ -1,5 +1,6 @@
 import { Router } from "express";
 import type { TenantsStore } from "../tenants/store.js";
+import { ResendMailer } from "../lib/resend.js";
 import { z } from "zod";
 import multer from "multer";
 import { Store } from "../store/store.js";
@@ -12,6 +13,8 @@ import type { RawBodyRequest } from "./raw-body.js";
 import { makeRateLimiter } from "./rate-limit.js";
 import { requireTenantKey } from "./tenant-key.js";
 
+import type { ShareStore } from "../share/store.js";
+
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 export function makeAdapterRoutes(args: {
@@ -20,6 +23,10 @@ export function makeAdapterRoutes(args: {
   presetId: string;
   dedupeWindowSeconds: number;
   waVerifyToken?: string;
+  mailer?: ResendMailer;
+  shares?: ShareStore;
+  publicBaseUrl?: string;
+
 }) {
   const r = Router();
   const agent = createAgent({
@@ -47,6 +54,38 @@ export function makeAdapterRoutes(args: {
 
   // --- SendGrid inbound parse (multipart/form-data) ---
   r.post("/email/sendgrid", upload.any(), async (req, res) => {
+    // Receipt mail interceptor (Resend) — reads payload.workItem safely
+    const __json = res.json.bind(res);
+    res.json = ((payload: any) => {
+      try {
+        const wi = payload?.workItem;
+        const tenantId =
+          (wi?.tenantId as string) ||
+          (req.query?.tenantId as string) ||
+          (payload?.tenantId as string);
+
+        const sender = wi?.sender as string | undefined;
+
+        if (args.mailer && args.shares && wi && sender && tenantId) {
+          const token = args.shares.create(tenantId);
+          const base = (process.env.PUBLIC_BASE_URL || "http://127.0.0.1:7090").replace(/\/+$/,"");
+          const shareUrl = base + "/ui/share/" + token;
+
+          args.mailer.sendReceipt({
+            to: sender,
+            subject: "Ticket created: " + (wi.subject || wi.id),
+            ticketId: wi.id,
+            tenantId,
+            dueAtISO: wi.dueAt,
+            slaSeconds: wi.slaSeconds,
+            priority: wi.priority,
+            shareUrl
+          }).catch(() => {});
+        }
+      } catch (e) {}
+      return __json(payload);
+    }) as any;
+
     const tenantId = z.string().min(1).parse(req.query.tenantId);
     const tk = requireTenantKey(req, tenantId, args.tenants);
     if (!tk.ok) return res.status(tk.status).json({ ok: false, error: tk.error });
@@ -107,7 +146,9 @@ export function makeAdapterRoutes(args: {
     if (!age.ok) return res.status(400).json({ ok: false, error: age.error });
 
     const ev = whatsappCloudToInboundEvent({ tenantId, body: req.body });
-    if (!ev) return res.json({ ok: true, ignored: true });
+    if (!ev) 
+    
+    return res.json({ ok: true, ignored: true });
 
     const out = await agent.intake(ev);
     res.json(out);

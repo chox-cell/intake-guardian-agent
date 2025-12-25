@@ -12,6 +12,7 @@ import { makeRoutes } from "./api/routes.js";
 import { makeAdapterRoutes } from "./api/adapters.js";
 import { makeOutboundRoutes } from "./api/outbound.js";
 import { makeUiRoutes } from "./api/ui.js";
+import { ShareStore } from "./share/store.js";
 import { captureRawBody } from "./api/raw-body.js";
 import { FileStore } from "./store/file.js";
 import { ResendMailer } from "./lib/resend.js";
@@ -31,15 +32,14 @@ const RESEND_DRY_RUN = process.env.RESEND_DRY_RUN === "1";
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 const store = new FileStore(path.resolve(DATA_DIR));
+
+const shares = new ShareStore();
+const mailer = (RESEND_API_KEY && RESEND_FROM)
+  ? new ResendMailer({ apiKey: RESEND_API_KEY, from: RESEND_FROM, publicBaseUrl: PUBLIC_BASE_URL, dryRun: RESEND_DRY_RUN })
+  : undefined;
 const tenants = new TenantsStore({ dataDir: DATA_DIR });
 
 
-const mailer = new ResendMailer({
-  apiKey: RESEND_API_KEY,
-  from: RESEND_FROM,
-  publicBaseUrl: PUBLIC_BASE_URL,
-  dryRun: RESEND_DRY_RUN
-});
 async function main() {
   await store.init();
 
@@ -52,22 +52,22 @@ async function main() {
   
   app.use(
     "/api/adapters",
-    makeAdapterRoutes({
-      store,
+    makeAdapterRoutes({ store,
       tenants,
+      shares,
       presetId: PRESET_ID,
       dedupeWindowSeconds: DEDUPE_WINDOW_SECONDS,
       waVerifyToken: WA_VERIFY_TOKEN || undefined,
       mailer,
       publicBaseUrl: PUBLIC_BASE_URL
-    })
+     })
   );
 
 
 
 
   // Simple HTML UI (MVP)
-  app.use("/ui", makeUiRoutes({ store, tenants }));
+  app.use("/ui", makeUiRoutes({ store, tenants, shares }));
   // V3 sales pack routes
   app.use("/api", makeOutboundRoutes({ store, tenants }));
 
