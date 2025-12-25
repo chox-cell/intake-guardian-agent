@@ -1,92 +1,84 @@
 import fs from "fs";
 import path from "path";
-import crypto from "crypto";
+import { nanoid } from "nanoid";
 
 export type TenantRecord = {
   tenantId: string;
-  tenantKeyHash: string; // sha256
+  tenantKey: string;
   createdAt: string;
   rotatedAt?: string;
 };
 
-export function hashKey(k: string) {
-  return crypto.createHash("sha256").update(k).digest("hex");
+function safeWriteJson(filePath: string, data: unknown) {
+  const dir = path.dirname(filePath);
+  fs.mkdirSync(dir, { recursive: true }); // ✅ mkdir the folder, not the file path
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + "\n", "utf8");
 }
 
-export function generateKey(len = 32) {
-  // url-safe-ish
-  return crypto.randomBytes(Math.ceil(len)).toString("base64url").slice(0, len);
+function safeReadJson<T>(filePath: string, fallback: T): T {
+  try {
+    if (!fs.existsSync(filePath)) return fallback;
+    const raw = fs.readFileSync(filePath, "utf8");
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
 }
 
 export class TenantsStore {
   private filePath: string;
-  private cache: Record<string, TenantRecord> = {};
-  private loaded = false;
+  private map: Map<string, TenantRecord>;
 
-  constructor(args: { dataDir: string }) {
-    this.filePath = path.resolve(args.dataDir, "tenants.json");
-  }
-
-  private loadIfNeeded() {
-    if (this.loaded) return;
-    this.loaded = true;
-    if (!fs.existsSync(this.filePath)) {
-      this.cache = {};
-      return;
-    }
-    const raw = fs.readFileSync(this.filePath, "utf-8").trim();
-    if (!raw) { this.cache = {}; return; }
-    this.cache = JSON.parse(raw);
-  }
-
-  private persist() {
-    const dir = path.dirname(this.filePath);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(this.filePath, JSON.stringify(this.cache, null, 2) + "\n", "utf-8");
-  }
-
-  list() {
-    this.loadIfNeeded();
-    return Object.values(this.cache).sort((a,b)=> (a.createdAt < b.createdAt ? 1 : -1));
-  }
-
-  get(tenantId: string) {
-    this.loadIfNeeded();
-    return this.cache[tenantId] || null;
-  }
-
-  upsertNew(tenantId: string) {
-    this.loadIfNeeded();
-    if (this.cache[tenantId]) {
-      return { created: false, tenantId, tenantKey: null as string | null };
-    }
-    const tenantKey = generateKey(32);
-    this.cache[tenantId] = {
-      tenantId,
-      tenantKeyHash: hashKey(tenantKey),
-      createdAt: new Date().toISOString()
-    };
+  constructor(opts: { dataDir: string }) {
+    this.filePath = path.resolve(opts.dataDir, "tenants.json");
+    const list = safeReadJson<TenantRecord[]>(this.filePath, []);
+    // Normalize persisted shape (array or {tenants:[]}) and avoid runtime crash
+const norm = Array.isArray(list) ? list : (list && Array.isArray((list as any).tenants) ? (list as any).tenants : []);
+this.map = new Map(norm.map((t: any) => [t.tenantId, t]));
+// persist to ensure file exists + normalized
     this.persist();
-    return { created: true, tenantId, tenantKey };
+  }
+
+  list(): TenantRecord[] {
+    return Array.from(this.map.values()).sort((a, b) =>
+      a.createdAt.localeCompare(b.createdAt)
+    );
+  }
+
+  get(tenantId: string): TenantRecord | undefined {
+    return this.map.get(tenantId);
+  }
+
+  verify(tenantId: string, tenantKey: string): boolean {
+    const t = this.map.get(tenantId);
+    if (!t) return false;
+    return t.tenantKey === tenantKey;
+  }
+
+  upsertNew(tenantId?: string) {
+    const id = tenantId?.trim() || `tenant_${Date.now()}`;
+    const now = new Date().toISOString();
+    const rec: TenantRecord = {
+      tenantId: id,
+      tenantKey: nanoid(32),
+      createdAt: now
+    };
+    this.map.set(id, rec);
+    this.persist();
+    return { tenantId: rec.tenantId, tenantKey: rec.tenantKey };
   }
 
   rotate(tenantId: string) {
-    this.loadIfNeeded();
-    if (!this.cache[tenantId]) return { ok: false as const, error: "tenant_not_found" as const };
-    const tenantKey = generateKey(32);
-    this.cache[tenantId] = {
-      ...this.cache[tenantId],
-      tenantKeyHash: hashKey(tenantKey),
-      rotatedAt: new Date().toISOString()
-    };
+    const t = this.map.get(tenantId);
+    if (!t) return { ok: false as const, error: "tenant_not_found" as const };
+    t.tenantKey = nanoid(32);
+    t.rotatedAt = new Date().toISOString();
+    this.map.set(tenantId, t);
     this.persist();
-    return { ok: true as const, tenantId, tenantKey };
+    return { ok: true as const, tenantId, tenantKey: t.tenantKey };
   }
 
-  verify(tenantId: string, tenantKey: string) {
-    this.loadIfNeeded();
-    const rec = this.cache[tenantId];
-    if (!rec) return false;
-    return hashKey(tenantKey) === rec.tenantKeyHash;
+  persist() {
+    safeWriteJson(this.filePath, this.list());
   }
 }
