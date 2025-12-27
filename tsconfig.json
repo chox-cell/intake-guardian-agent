@@ -15,6 +15,11 @@
     "build",
     "__bak_*",
     "__bak_salespack_*",
-    "**/*.bak.*"
+    "**/*.bak.*",
+    ".bak",
+    "__bak_resend_*",
+    "__bak_fix_*",
+    "__bak_ui_v*",
+    "__bak_ui_*"
   ]
 }

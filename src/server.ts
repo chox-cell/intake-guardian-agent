@@ -1,6 +1,5 @@
 import fs from "fs";
 import path from "path";
-
 import dotenv from "dotenv";
 dotenv.config({ path: path.resolve(process.cwd(), ".env.local") });
 dotenv.config({ path: path.resolve(process.cwd(), ".env") });
@@ -13,9 +12,8 @@ import { TenantsStore } from "./tenants/store.js";
 
 import { makeRoutes } from "./api/routes.js";
 import { makeAdapterRoutes } from "./api/adapters.js";
-import { makeOutboundRoutes } from "./api/outbound.js";
 import { makeUiRoutes } from "./api/ui.js";
-
+import { makeOutboundRoutes } from "./api/outbound.js";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 
 const PORT = Number(process.env.PORT || 7090);
@@ -39,6 +37,7 @@ const app = express();
 
   // Core API
   app.use("/api", makeRoutes({ store, presetId: PRESET_ID, dedupeWindowSeconds: DEDUPE_WINDOW_SECONDS }));
+app.use("/ui", makeUiRoutes({ store, tenants }));
 
   // Inbound adapters (Email/WhatsApp/Webhook)
   app.use(
