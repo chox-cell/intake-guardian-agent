@@ -1,33 +1,48 @@
 import type { Request } from "express";
-import { z } from "zod";
 import type { TenantsStore } from "../tenants/store.js";
 
-function parseTenantKeysJson(): Record<string, string> {
-  const raw = (process.env.TENANT_KEYS_JSON || "").trim();
-  if (!raw) return {};
-  // allow either plain JSON or quoted JSON string
-  let v = raw;
-  if ((v.startsWith("'") && v.endsWith("'")) || (v.startsWith('"') && v.endsWith('"'))) v = v.slice(1, -1);
-  try {
-    return z.record(z.string(), z.string()).parse(JSON.parse(v));
-  } catch {
-    return {};
-  }
+function safeJson(s: string) {
+  try { return JSON.parse(s); } catch { return null; }
 }
 
-export function requireTenantKey(req: Request, tenantId: string, tenantsStore?: TenantsStore) {
-  const key = (req.header("x-tenant-key") || "").trim();
-  if (!key) return { ok: false as const, status: 401, error: "missing_tenant_key" as const };
+function getKeyFromReq(req: Request): string {
+  const h = (req.header("x-tenant-key") || "").trim();
+  if (h) return h;
 
-  // 1) Prefer TenantsStore if provided (file-based keys)
-  if (tenantsStore) {
-    const ok = tenantsStore.verify(tenantId, key);
-    if (ok) return { ok: true as const };
+  // UI links: /ui/...?k=TENANT_KEY
+  const q = (typeof req.query.k === "string" ? req.query.k : "").trim();
+  if (q) return q;
+
+  // optional: body.k
+  const b = (req.body && typeof (req.body as any).k === "string" ? (req.body as any).k : "").trim();
+  if (b) return b;
+
+  return "";
+}
+
+export function requireTenantKey(req: Request, tenantId: string, tenantsStore?: TenantsStore, _ignored?: any) {
+  const key = getKeyFromReq(req);
+
+  if (!key) {
+    return { ok: false as const, status: 401, error: "missing_tenant_key" as const };
   }
 
-  // 2) Fallback to TENANT_KEYS_JSON (back-compat)
-  const m = parseTenantKeysJson();
-  if (m[tenantId] && m[tenantId] === key) return { ok: true as const };
+  // Preferred: TenantsStore (dynamic tenants created via admin)
+  if (tenantsStore) {
+    const ok = tenantsStore.verify(tenantId, key);
+    if (!ok) return { ok: false as const, status: 401, error: "invalid_tenant_key" as const };
+    return { ok: true as const, status: 200, key };
+  }
 
-  return { ok: false as const, status: 403, error: "invalid_tenant_key" as const };
+  // Fallback: TENANT_KEYS_JSON for dev
+  const raw = (process.env.TENANT_KEYS_JSON || "").trim();
+  if (!raw) {
+    return { ok: false as const, status: 500, error: "tenant_keys_not_configured" as const };
+  }
+  const obj = safeJson(raw);
+  const expected = obj && typeof obj[tenantId] === "string" ? String(obj[tenantId]) : "";
+  if (!expected || expected !== key) {
+    return { ok: false as const, status: 401, error: "invalid_tenant_key" as const };
+  }
+  return { ok: true as const, status: 200, key };
 }
