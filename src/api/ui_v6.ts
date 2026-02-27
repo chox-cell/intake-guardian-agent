@@ -1,7 +1,22 @@
-import { Router } from "express";
-import { z } from "zod";
-import type { TenantsStore } from "../tenants/store.js";
+import type { Request, Response } from "express";
+
+function __authCode(e: any){ return String(e?.code || e?.message || "invalid_tenant_key"); }
 import { requireTenantKey } from "./tenant-key.js";
+
+/**
+ * UI v6 (polished)
+ * - /ui/tickets : clean table, search + status filter, copy link, export, CTA
+ * - /ui/export.csv : downloads CSV
+ * - /ui/status : POST to update status (runtime-safe: tries multiple store methods)
+ *
+ * Tenant auth: uses requireTenantKey which accepts:
+ * - header: x-tenant-key
+ * - query:  ?k=...
+ * - body:   { k: ... }
+ */
+
+type AnyStore = any;
+type AnyTenants = any;
 
 function esc(s: any) {
   return String(s ?? "")
@@ -9,249 +24,462 @@ function esc(s: any) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+    .replaceAll("'", "&#39;");
 }
 
-function fmtIso(s?: string) {
-  if (!s) return "";
-  try {
-    const d = new Date(s);
-    return isNaN(d.getTime()) ? s : d.toISOString().replace("T"," ").slice(0,19) + "Z";
-  } catch { return s; }
-}
-
-function csvEscape(v: any) {
+function toCsvCell(v: any) {
   const s = String(v ?? "");
-  if (/[,"\n]/.test(s)) return `"${s.replaceAll('"','""')}"`;
-  return s;
+  const needs = /[,"\n]/.test(s);
+  const out = s.replaceAll('"', '""');
+  return needs ? `"${out}"` : out;
 }
 
-export function makeUiRoutes(args: { store: any; tenants?: TenantsStore; publicBaseUrl?: string }) {
-  const r = Router();
-
-  r.get("/", (req, res) => {
-    const base = (args.publicBaseUrl || "").trim() || `${req.protocol}://${req.get("host")}`;
-    res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.end(`<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Intake-Guardian UI</title>
-<style>
-  body{font-family:ui-sans-serif,system-ui,Arial; background:#0b1220; color:#e5e7eb; margin:0}
-  .wrap{max-width:1100px;margin:0 auto;padding:24px}
-  .card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.10);border-radius:14px;padding:16px}
-  .row{display:flex;gap:12px;flex-wrap:wrap}
-  input{background:#0a0f1a;border:1px solid rgba(255,255,255,.14);color:#e5e7eb;border-radius:10px;padding:10px 12px;outline:none;width:320px}
-  .btn{cursor:pointer;background:#1f6feb;border:0;color:white;border-radius:10px;padding:10px 12px;font-weight:600}
-  .muted{color:#9ca3af;font-size:13px}
-  a{color:#93c5fd}
-</style></head>
-<body><div class="wrap">
-  <h1 style="margin:0 0 6px 0">Intake-Guardian (UI)</h1>
-  <div class="muted" style="margin-bottom:14px">Paste tenantId + key → open tickets + export CSV.</div>
-
-  <div class="card">
-    <div class="row">
-      <input id="tenantId" placeholder="tenantId (ex: tenant_...)" />
-      <input id="k" placeholder="tenant key (k=...)" />
-      <button class="btn" onclick="go()">Open Tickets</button>
-      <button class="btn" style="background:#10b981" onclick="csv()">Export CSV</button>
-    </div>
-    <div class="muted" style="margin-top:10px">
-      Example link format:
-      <br><code>${esc(base)}/ui/tickets?tenantId=TENANT_ID&k=TENANT_KEY</code>
-    </div>
-  </div>
-
-<script>
-function go(){
-  const t=document.getElementById('tenantId').value.trim();
-  const k=document.getElementById('k').value.trim();
-  if(!t||!k) return alert('missing tenantId or key');
-  location.href='/ui/tickets?tenantId='+encodeURIComponent(t)+'&k='+encodeURIComponent(k);
+function fmtDate(iso: any) {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return String(iso);
+    return d.toISOString().replace("T", " ").replace("Z", "Z");
+  } catch {
+    return String(iso);
+  }
 }
-function csv(){
-  const t=document.getElementById('tenantId').value.trim();
-  const k=document.getElementById('k').value.trim();
-  if(!t||!k) return alert('missing tenantId or key');
-  location.href='/ui/export.csv?tenantId='+encodeURIComponent(t)+'&k='+encodeURIComponent(k);
+
+function baseUrl(req: Request, publicBaseUrl?: string) {
+  if (publicBaseUrl) return publicBaseUrl.replace(/\/+$/, "");
+  const proto = (req.headers["x-forwarded-proto"] as string) || req.protocol || "http";
+  const host = (req.headers["x-forwarded-host"] as string) || req.get("host") || "127.0.0.1";
+  return `${proto}://${host}`;
 }
-</script>
-</div></body></html>`);
-  });
 
-  r.get("/tickets", async (req, res) => {
-    const tenantId = z.string().min(1).parse(req.query.tenantId);
-    const tk = requireTenantKey(req as any, tenantId, args.tenants);
-    if (!tk.ok) return res.status(tk.status).send(`<pre>${tk.error}</pre>`);
-
-    const q = {
-      status: (typeof req.query.status === "string" ? req.query.status : undefined),
-      limit: Number(req.query.limit || 200),
-      offset: 0,
-      search: (typeof req.query.search === "string" ? req.query.search : undefined)
-    };
-
-    const items = await args.store.listWorkItems(tenantId, q);
-
-    const baseUrl = (args.publicBaseUrl || "").trim() || `${req.protocol}://${req.get("host")}`;
-    const link = `${baseUrl}/ui/tickets?tenantId=${encodeURIComponent(tenantId)}&k=${encodeURIComponent(String(req.query.k||""))}`;
-    const exportLink = `${baseUrl}/ui/export.csv?tenantId=${encodeURIComponent(tenantId)}&k=${encodeURIComponent(String(req.query.k||""))}`;
-
-    res.setHeader("Content-Type","text/html; charset=utf-8");
-    res.end(`<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Tickets • ${esc(tenantId)}</title>
-<style>
-  body{font-family:ui-sans-serif,system-ui,Arial;background:#0b1220;color:#e5e7eb;margin:0}
-  .wrap{max-width:1200px;margin:0 auto;padding:24px}
-  .top{display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:space-between;margin-bottom:14px}
-  .pill{font-size:12px;color:#93c5fd;background:rgba(147,197,253,.12);border:1px solid rgba(147,197,253,.22);padding:6px 10px;border-radius:999px}
-  .btn{cursor:pointer;background:#1f6feb;border:0;color:white;border-radius:10px;padding:10px 12px;font-weight:700}
-  .btn2{cursor:pointer;background:#10b981;border:0;color:white;border-radius:10px;padding:10px 12px;font-weight:700}
-  .card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.10);border-radius:14px;padding:14px}
-  table{width:100%;border-collapse:collapse}
-  th,td{padding:10px 10px;border-bottom:1px solid rgba(255,255,255,.10);text-align:left;font-size:13px;vertical-align:top}
-  th{color:#9ca3af;font-weight:600}
-  .muted{color:#9ca3af;font-size:12px}
-  .actions{display:flex;gap:6px;flex-wrap:wrap}
-  .sbtn{cursor:pointer;background:#111827;border:1px solid rgba(255,255,255,.14);color:#e5e7eb;border-radius:10px;padding:6px 8px;font-size:12px}
-  .sbtn:hover{border-color:rgba(255,255,255,.25)}
-  code{background:rgba(0,0,0,.35);padding:2px 6px;border-radius:8px}
-  a{color:#93c5fd}
-</style></head>
-<body><div class="wrap">
-  <div class="top">
-    <div>
-      <div style="font-size:22px;font-weight:800">Tickets</div>
-      <div class="muted">tenantId: <code>${esc(tenantId)}</code> • total: <code>${items.length}</code></div>
-    </div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap">
-      <button class="btn" onclick="copyLink()">Copy UI Link</button>
-      <a class="btn2" href="${esc(exportLink)}" style="text-decoration:none;display:inline-block">Export CSV</a>
-      <a class="pill" href="/ui" style="text-decoration:none">Change tenant</a>
-    </div>
-  </div>
-
-  <div class="card" style="margin-bottom:14px">
-    <div class="muted">Share this with the client:</div>
-    <div style="margin-top:6px"><code id="share">${esc(link)}</code></div>
-  </div>
-
-  <div class="card">
-    <table>
-      <thead>
-        <tr>
-          <th>Id</th>
-          <th>Subject / Sender</th>
-          <th>Status</th>
-          <th>Priority</th>
-          <th>SLA / Due</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${items.map((it:any)=>`
-          <tr>
-            <td><code>${esc(it.id)}</code><div class="muted">${esc(it.source||"")}</div></td>
-            <td>
-              <div style="font-weight:700">${esc(it.subject||"(no subject)")}</div>
-              <div class="muted">${esc(it.sender||"")}</div>
-            </td>
-            <td><code>${esc(it.status)}</code></td>
-            <td><code>${esc(it.priority)}</code><div class="muted">${esc(it.category||"")}</div></td>
-            <td>
-              <div class="muted">SLA: ${esc(it.slaSeconds)}s</div>
-              <div><code>${esc(fmtIso(it.dueAt))}</code></div>
-            </td>
-            <td>
-              <form method="POST" action="/ui/status" class="actions">
-                <input type="hidden" name="tenantId" value="${esc(tenantId)}"/>
-                <input type="hidden" name="k" value="${esc(String(req.query.k||""))}"/>
-                <input type="hidden" name="id" value="${esc(it.id)}"/>
-                <button class="sbtn" name="next" value="new">new</button>
-                <button class="sbtn" name="next" value="in_progress">in_progress</button>
-                <button class="sbtn" name="next" value="done">done</button>
-                <button class="sbtn" name="next" value="blocked">blocked</button>
-              </form>
-            </td>
-          </tr>
-        `).join("")}
-      </tbody>
-    </table>
-
-    ${items.length===0 ? `<div class="muted" style="padding:12px">No tickets yet. Send an email/whatsapp intake to create one.</div>` : ``}
-  </div>
-
-  <div style="margin-top:14px" class="muted">
-    Demo CTA: send “Hi Intake-Guardian, I want a demo” on WhatsApp (hook later) or email: <code>${esc(process.env.CONTACT_EMAIL || process.env.RESEND_FROM || "support@yourdomain.com")}</code>
-  </div>
-
-<script>
-async function copyLink(){
-  const t = document.getElementById('share').innerText;
-  try { await navigator.clipboard.writeText(t); alert('Copied'); }
-  catch { prompt('Copy this link:', t); }
+async function trySetStatus(store: AnyStore, tenantId: string, id: string, next: string) {
+  // Try multiple known shapes (we keep it runtime-safe).
+  if (typeof store?.setStatus === "function") {
+    return store.setStatus(tenantId, id, next, "ui");
+  }
+  if (typeof store?.updateStatus === "function") {
+    return store.updateStatus(tenantId, id, next, "ui");
+  }
+  if (typeof store?.updateWorkItem === "function") {
+    return store.updateWorkItem(tenantId, id, { status: next }, "ui");
+  }
+  if (typeof store?.patchWorkItem === "function") {
+    return store.patchWorkItem(tenantId, id, { status: next }, "ui");
+  }
+  throw new Error("store_status_update_not_supported");
 }
-</script>
-</div></body></html>`);
-  });
 
-  // Status update (best-effort): use store method if exists; otherwise 501 (but UI won’t crash)
-  r.post("/status", async (req, res) => {
-    const tenantId = z.string().min(1).parse(req.body.tenantId);
-    const id = z.string().min(1).parse(req.body.id);
-    const next = z.string().min(1).parse(req.body.next);
-    const tk = requireTenantKey(req as any, tenantId, args.tenants);
-    if (!tk.ok) return res.status(tk.status).send(`<pre>${tk.error}</pre>`);
+export function makeUiRoutes(args: {
+  store: AnyStore;
+  tenants?: AnyTenants;
+  publicBaseUrl?: string;
+  whatsappPhone?: string;
+  whatsappText?: string;
+  contactEmail?: string;
+}) {
+  const { store } = args;
 
-    const store:any = args.store;
-    const fn =
-      store.setStatus ||
-      store.updateStatus ||
-      store.setWorkItemStatus ||
-      store.updateWorkItemStatus ||
-      null;
+  // Lazy import to avoid type fights across refactors
+  return async function uiRouter(req: Request, res: Response) {
+    const u = new URL(req.originalUrl, baseUrl(req, args.publicBaseUrl));
+    const path = u.pathname;
 
-    if (!fn) {
-      return res.status(501).send(`<pre>status_update_not_supported_by_store</pre>`);
+    // ---- helpers
+    const tenantId = (u.searchParams.get("tenantId") || "").trim();
+    if (!tenantId) {
+      res.status(400).send("missing_tenantId");
+      return;
     }
 
-    await fn.call(store, tenantId, id, next, "ui");
-    return res.redirect(302, `/ui/tickets?tenantId=${encodeURIComponent(tenantId)}&k=${encodeURIComponent(String(req.body.k||""))}`);
-  });
+    // Require key for all UI endpoints
+    try {
+      requireTenantKey(req, tenantId, args.tenants);
+    } catch (e: any) {
 
-  r.get("/export.csv", async (req, res) => {
-    const tenantId = z.string().min(1).parse(req.query.tenantId);
-    const tk = requireTenantKey(req as any, tenantId, args.tenants);
-    if (!tk.ok) return res.status(tk.status).send(`<pre>${tk.error}</pre>`);
+// Phase48b (dev-only): bypass tenant key for local demo E2E
+// Rule: if NODE_ENV=development AND tenantId=demo AND (k or x-tenant-key) == ADMIN_KEY => allow
+try {
+  const __dev = (process.env.NODE_ENV || "development") === "development";
+  const __tenantId = String((req?.query?.tenantId ?? req?.query?.tenant ?? req?.params?.tenantId ?? "") || "");
+  const __k = String((req?.query?.k ?? req?.headers?.["x-tenant-key"] ?? req?.headers?.["x-tenant-token"] ?? "") || "");
+  const __admin = String(process.env.ADMIN_KEY || "");
+  if (false && __dev && __tenantId === "demo" && __admin && __k === __admin) {
+    // allow (skip invalid_tenant_key)
+  } else {
+    throw new Error("no-bypass");
+  }
+} catch (_e) {
+  // no bypass; continue normal invalid_tenant_key path
+}
 
-    const items = await args.store.listWorkItems(tenantId, { limit: 1000, offset: 0 });
+// Phase48b guard: only emit invalid_tenant_key if dev bypass did NOT match
+try {
+  const __dev = (process.env.NODE_ENV || "development") === "development";
+  const __tenantId = String((req?.query?.tenantId ?? req?.query?.tenant ?? req?.params?.tenantId ?? "") || "");
+  const __k = String((req?.query?.k ?? req?.headers?.["x-tenant-key"] ?? req?.headers?.["x-tenant-token"] ?? "") || "");
+  const __admin = String(process.env.ADMIN_KEY || "");
+  const __bypass = (false && __dev && __tenantId === "demo" && __admin && __k === __admin);
+  if (!__bypass) {
+          res.status(401).send("invalid_tenant_key");
+  }
+} catch (_e) {
+  // if guard fails, fall back to original invalid response
+      res.status(401).send("invalid_tenant_key");
+}
+      return;
+    }
 
-    const header = [
-      "id","tenantId","source","sender","subject","category","priority","status","slaSeconds","dueAt","createdAt","updatedAt"
-    ].join(",");
+    // ---- ROUTES
+    if (path === "/ui/export.csv") {
+      const status = (u.searchParams.get("status") || "").trim();
+      const search = (u.searchParams.get("q") || "").trim();
 
-    const lines = items.map((it:any)=>[
-      csvEscape(it.id),
-      csvEscape(it.tenantId),
-      csvEscape(it.source),
-      csvEscape(it.sender),
-      csvEscape(it.subject),
-      csvEscape(it.category),
-      csvEscape(it.priority),
-      csvEscape(it.status),
-      csvEscape(it.slaSeconds),
-      csvEscape(it.dueAt),
-      csvEscape(it.createdAt),
-      csvEscape(it.updatedAt),
-    ].join(","));
+      const q: any = { };
+      if (status) q.status = status;
+      if (search) q.search = search;
 
-    const csv = [header, ...lines].join("\n");
+      const items = await store.listWorkItems(tenantId, q);
 
-    res.setHeader("Content-Type","text/csv; charset=utf-8");
-    res.setHeader("Content-Disposition", `attachment; filename="tickets_${tenantId}.csv"`);
-    res.end(csv);
-  });
+      const header = [
+        "id","subject","sender","status","priority","slaSeconds","dueAt","createdAt","category"
+      ];
+      const lines = [header.join(",")];
 
-  return r;
+      for (const it of items || []) {
+        lines.push([
+          toCsvCell(it.id),
+          toCsvCell(it.subject),
+          toCsvCell(it.sender),
+          toCsvCell(it.status),
+          toCsvCell(it.priority),
+          toCsvCell(it.slaSeconds),
+          toCsvCell(it.dueAt),
+          toCsvCell(it.createdAt),
+          toCsvCell(it.category),
+        ].join(","));
+      }
+
+      const csv = lines.join("\n") + "\n";
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="tickets_${tenantId}.csv"`);
+      res.status(200).send(csv);
+      return;
+    }
+
+    if (path === "/ui/status" && req.method === "POST") {
+      // Body can be urlencoded or json; we only need id/next
+      const id = String((req.body && (req.body.id || req.body.ticketId)) || "");
+      const next = String((req.body && (req.body.next || req.body.status)) || "");
+      if (!id || !next) {
+        res.status(400).json({ ok: false, error: "missing_id_or_status" });
+        return;
+      }
+      try {
+        await trySetStatus(store, tenantId, id, next);
+        res.status(200).json({ ok: true });
+      } catch (e: any) {
+        res.status(501).json({ ok: false, error: e?.message || "status_update_failed" });
+      }
+      return;
+    }
+
+    if (path === "/ui/tickets") {
+      const status = (u.searchParams.get("status") || "").trim();
+      const search = (u.searchParams.get("q") || "").trim();
+
+      const q: any = { };
+      if (status) q.status = status;
+      if (search) q.search = search;
+
+      const items = await store.listWorkItems(tenantId, q);
+
+      const k = u.searchParams.get("k") || ""; // used only for building share link
+      const uiLink = `${baseUrl(req, args.publicBaseUrl)}/ui/tickets?tenantId=${encodeURIComponent(tenantId)}&k=${encodeURIComponent(k)}`;
+      const exportLink = `${baseUrl(req, args.publicBaseUrl)}/ui/export.csv?tenantId=${encodeURIComponent(tenantId)}&k=${encodeURIComponent(k)}${status?`&status=${encodeURIComponent(status)}`:""}${search?`&q=${encodeURIComponent(search)}`:""}`;
+
+      const waPhone = (args.whatsappPhone || "").replace(/[^\d+]/g, "");
+      const waText = args.whatsappText || "Hi Intake-Guardian, I want a demo.";
+      const waLink = waPhone
+        ? `https://api.whatsapp.com/send/?phone=${encodeURIComponent(waPhone)}&text=${encodeURIComponent(waText)}&type=phone_number&app_absent=0`
+        : "";
+
+      const email = args.contactEmail || "";
+
+      const rows = (items || []).map((it: any) => {
+        const st = esc(it.status);
+        const pr = esc(it.priority);
+        const due = fmtDate(it.dueAt);
+        const subj = esc(it.subject || "(no subject)");
+        const sender = esc(it.sender || "—");
+        const cat = esc(it.category || "—");
+        const id = esc(it.id);
+
+        const actions = `
+          <div class="actions">
+            <form method="post" action="/ui/status?tenantId=${encodeURIComponent(tenantId)}&k=${encodeURIComponent(k)}">
+              <input type="hidden" name="id" value="${id}">
+              <button name="next" value="new" class="btn btn-ghost ${st==="new"?"is-on":""}">New</button>
+              <button name="next" value="open" class="btn btn-ghost ${st==="open"?"is-on":""}">Open</button>
+              <button name="next" value="done" class="btn btn-ghost ${st==="done"?"is-on":""}">Done</button>
+            </form>
+          </div>
+        `;
+
+        return `
+          <tr>
+            <td class="mono">${id}</td>
+            <td>
+              <div class="subject">${subj}</div>
+              <div class="muted">${sender} · <span class="chip">${cat}</span></div>
+            </td>
+            <td><span class="pill pill-${st}">${st}</span></td>
+            <td><span class="pill pill-pr">${pr}</span></td>
+            <td class="mono">${due}</td>
+            <td>${actions}</td>
+          </tr>
+        `;
+      }).join("");
+
+      const empty = `
+        <div class="empty">
+          <div class="empty-title">No tickets yet</div>
+          <div class="empty-sub">Send an email or WhatsApp intake to create the first ticket.</div>
+          <div class="empty-actions">
+            <button class="btn btn-primary" onclick="alert('Tip: use the adapter endpoint to create a demo ticket.');">Create demo ticket</button>
+            <a class="btn btn-ghost" href="${esc(exportLink)}">Export CSV</a>
+          </div>
+          <div class="code">
+            <div class="muted">Quick demo (Email adapter):</div>
+            <pre>curl -sS "${baseUrl(req, args.publicBaseUrl)}/api/adapters/email/sendgrid?tenantId=${esc(tenantId)}" \\
+  -H "x-tenant-key: &lt;TENANT_KEY&gt;" \\
+  -F 'from=employee@corp.local' \\
+  -F 'subject=VPN broken (demo)' \\
+  -F 'text=VPN is down ASAP.'</pre>
+          </div>
+        </div>
+      `;
+
+      const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Tickets · ${esc(tenantId)}</title>
+  <style>
+    :root{
+      --bg:#070a10; --panel:#0b1220; --panel2:#0a1020;
+      --line:rgba(148,163,184,.18);
+      --text:#e5e7eb; --muted:#9aa7b6;
+      --brand:#3b82f6; --ok:#22c55e; --warn:#f59e0b; --danger:#ef4444;
+      --radius:14px;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      background: radial-gradient(1000px 500px at 20% 0%, rgba(59,130,246,.12), transparent 60%),
+                  radial-gradient(900px 500px at 80% 20%, rgba(34,197,94,.10), transparent 55%),
+                  var(--bg);
+      color:var(--text);
+    }
+    .wrap{max-width:1100px; margin:0 auto; padding:22px 18px 60px;}
+    .top{
+      display:flex; align-items:flex-start; justify-content:space-between; gap:14px;
+      padding:18px; border:1px solid var(--line);
+      background:linear-gradient(180deg, rgba(11,18,32,.88), rgba(11,18,32,.62));
+      border-radius:var(--radius);
+      box-shadow:0 12px 40px rgba(0,0,0,.35);
+    }
+    h1{margin:0; font-size:20px; letter-spacing:.2px}
+    .sub{color:var(--muted); font-size:12px; margin-top:6px}
+    .btnbar{display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end}
+    .btn{
+      border-radius:12px; padding:10px 12px; font-weight:700;
+      border:1px solid var(--line);
+      background:rgba(255,255,255,.02);
+      color:var(--text); cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; gap:8px;
+    }
+    .btn:hover{border-color:rgba(148,163,184,.35)}
+    .btn-primary{background:rgba(59,130,246,.18); border-color:rgba(59,130,246,.35)}
+    .btn-success{background:rgba(34,197,94,.18); border-color:rgba(34,197,94,.35)}
+    .btn-ghost{background:rgba(255,255,255,.01)}
+    .is-on{outline:2px solid rgba(59,130,246,.35)}
+    .share{
+      margin-top:12px;
+      padding:14px 16px;
+      border:1px dashed rgba(148,163,184,.28);
+      background:rgba(255,255,255,.02);
+      border-radius:var(--radius);
+      display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap;
+    }
+    .share pre{
+      margin:0; color:#cbd5e1; font-size:12px; overflow:auto; max-width:100%;
+      padding:8px 10px; background:rgba(0,0,0,.25); border-radius:10px; border:1px solid var(--line);
+    }
+    .filters{
+      margin-top:14px;
+      display:flex; gap:10px; flex-wrap:wrap;
+      padding:14px 16px; border:1px solid var(--line);
+      background:rgba(255,255,255,.02); border-radius:var(--radius);
+      align-items:center; justify-content:space-between;
+    }
+    .field{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
+    input, select{
+      background:rgba(0,0,0,.22);
+      border:1px solid var(--line);
+      color:var(--text);
+      border-radius:12px;
+      padding:10px 12px;
+      outline:none;
+      min-width:210px;
+    }
+    .table{
+      margin-top:14px;
+      border:1px solid var(--line);
+      background:rgba(255,255,255,.02);
+      border-radius:var(--radius);
+      overflow:hidden;
+    }
+    table{width:100%; border-collapse:collapse}
+    th, td{padding:12px 12px; border-bottom:1px solid rgba(148,163,184,.10); vertical-align:top}
+    th{font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.12em; background:rgba(0,0,0,.22)}
+    tr:hover td{background:rgba(255,255,255,.02)}
+    .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size:12px}
+    .muted{color:var(--muted); font-size:12px}
+    .subject{font-weight:800}
+    .chip{
+      display:inline-block; padding:2px 8px; border-radius:999px;
+      border:1px solid rgba(148,163,184,.22); background:rgba(255,255,255,.02);
+    }
+    .pill{display:inline-flex; align-items:center; justify-content:center;
+      padding:4px 10px; border-radius:999px; border:1px solid rgba(148,163,184,.22);
+      font-weight:800; font-size:12px; text-transform:lowercase;
+    }
+    .pill-new{background:rgba(59,130,246,.14); border-color:rgba(59,130,246,.30)}
+    .pill-open{background:rgba(245,158,11,.14); border-color:rgba(245,158,11,.28)}
+    .pill-done{background:rgba(34,197,94,.14); border-color:rgba(34,197,94,.28)}
+    .pill-pr{background:rgba(148,163,184,.08)}
+    .actions form{display:flex; gap:8px; flex-wrap:wrap}
+    .empty{padding:26px 18px}
+    .empty-title{font-size:16px; font-weight:900}
+    .empty-sub{margin-top:6px; color:var(--muted)}
+    .empty-actions{margin-top:14px; display:flex; gap:10px; flex-wrap:wrap}
+    .code{margin-top:14px}
+    pre{white-space:pre; overflow:auto}
+    .footer{
+      margin-top:16px;
+      color:var(--muted);
+      font-size:12px;
+      text-align:left;
+    }
+    @media (max-width: 820px){
+      .btnbar{justify-content:flex-start}
+      input, select{min-width:160px}
+      th:nth-child(1), td:nth-child(1){display:none}
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div>
+        <h1>Tickets</h1>
+        <div class="sub">tenantId: <span class="mono">${esc(tenantId)}</span> · total: <span class="mono">${esc((items||[]).length)}</span></div>
+      </div>
+      <div class="btnbar">
+        <a class="btn btn-primary" href="${esc(uiLink)}">Refresh</a>
+        <button class="btn" onclick="copyText('${esc(uiLink)}')">Copy UI link</button>
+        <a class="btn btn-success" href="${esc(exportLink)}">Export CSV</a>
+        <button class="btn btn-ghost" onclick="changeTenant()">Change tenant</button>
+      </div>
+    </div>
+
+    <div class="share">
+      <div class="muted">Share this with the client:</div>
+      <pre id="share">${esc(uiLink)}</pre>
+    </div>
+
+    <div class="filters">
+      <div class="field">
+        <form method="get" action="/ui/tickets">
+          <input type="hidden" name="tenantId" value="${esc(tenantId)}"/>
+          <input type="hidden" name="k" value="${esc(k)}"/>
+          <input name="q" value="${esc(search)}" placeholder="Search subject/sender..." />
+          <select name="status">
+            <option value="" ${status===""?"selected":""}>All statuses</option>
+            <option value="new" ${status==="new"?"selected":""}>new</option>
+            <option value="open" ${status==="open"?"selected":""}>open</option>
+            <option value="done" ${status==="done"?"selected":""}>done</option>
+          </select>
+          <button class="btn btn-primary" type="submit">Apply</button>
+          <a class="btn btn-ghost" href="/ui/tickets?tenantId=${encodeURIComponent(tenantId)}&k=${encodeURIComponent(k)}">Reset</a>
+        </form>
+      </div>
+      <div class="field">
+        ${waLink ? `<a class="btn btn-success" href="${esc(waLink)}" target="_blank" rel="noreferrer">Book demo on WhatsApp</a>` : ``}
+        ${email ? `<a class="btn" href="mailto:${esc(email)}?subject=${encodeURIComponent("Intake-Guardian demo")}" target="_blank">Contact by Email</a>` : ``}
+      </div>
+    </div>
+
+    <div class="table">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:22%">Id</th>
+            <th>Subject / Sender</th>
+            <th style="width:10%">Status</th>
+            <th style="width:10%">Priority</th>
+            <th style="width:16%">SLA / Due</th>
+            <th style="width:22%">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows || `<tr><td colspan="6">${empty}</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="footer">
+      Intake-Guardian · proof UI (sellable MVP) · export & status in one place.
+    </div>
+  </div>
+
+  <script>
+    function copyText(t){
+      navigator.clipboard.writeText(t).then(()=>toast("Copied ✅")).catch(()=>prompt("Copy this:", t));
+    }
+    function toast(msg){
+      const d=document.createElement('div');
+      d.textContent=msg;
+      d.style.position='fixed';
+      d.style.bottom='18px';
+      d.style.left='50%';
+      d.style.transform='translateX(-50%)';
+      d.style.padding='10px 14px';
+      d.style.border='1px solid rgba(148,163,184,.25)';
+      d.style.background='rgba(0,0,0,.55)';
+      d.style.color='#e5e7eb';
+      d.style.borderRadius='12px';
+      d.style.fontWeight='800';
+      d.style.zIndex='9999';
+      document.body.appendChild(d);
+      setTimeout(()=>d.remove(), 1400);
+    }
+    function changeTenant(){
+      const t = prompt("Tenant ID:");
+      const k = prompt("Tenant key:");
+      if(!t || !k) return;
+      location.href = "/ui/tickets?tenantId="+encodeURIComponent(t)+"&k="+encodeURIComponent(k);
+    }
+  </script>
+</body>
+</html>`;
+
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.status(200).send(html);
+      return;
+    }
+
+    // fallback
+    res.status(404).send("not_found");
+  };
 }

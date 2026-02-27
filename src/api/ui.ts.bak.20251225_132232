@@ -1,0 +1,250 @@
+import express from "express";
+import type { Store } from "../store/types.js";
+import type { TenantsStore } from "../tenants/store.js";
+import type { ShareStore } from "../shares/store.js";
+import { requireTenantKey } from "./tenant-key.js";
+
+function esc(s: any) {
+  return String(s ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function shortId(id: string) {
+  if (!id) return "";
+  if (id.length <= 12) return id;
+  return id.slice(0, 6) + "…" + id.slice(-4);
+}
+
+function msUntil(iso?: string) {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return null;
+  return t - Date.now();
+}
+
+function humanDelta(ms: number) {
+  const s = Math.floor(Math.abs(ms) / 1000);
+  const m = Math.floor(s / 60);
+  const h = Math.floor(m / 60);
+  if (h >= 48) return `${Math.floor(h / 24)}d`;
+  if (h >= 1) return `${h}h`;
+  return `${Math.max(1, m)}m`;
+}
+
+function badge(kind: string, val: string) {
+  const v = (val || "").toLowerCase();
+  let cls = "badge";
+  if (kind === "priority") {
+    cls += v === "high" ? " prio-high" : v === "medium" ? " prio-med" : " prio-low";
+  } else if (kind === "status") {
+    cls += v === "done" ? " st-done" : v === "in_progress" ? " st-prog" : " st-new";
+  }
+  return `<span class="${cls}">${esc(val)}</span>`;
+}
+
+function dueCell(dueAt?: string) {
+  const ms = msUntil(dueAt);
+  if (ms === null) return `<span class="muted">-</span>`;
+  if (ms < 0) return `<span class="due due-bad">Overdue ${esc(humanDelta(ms))}</span><div class="muted mono">${esc(dueAt)}</div>`;
+  if (ms <= 2 * 60 * 60 * 1000) return `<span class="due due-warn">Due in ${esc(humanDelta(ms))}</span><div class="muted mono">${esc(dueAt)}</div>`;
+  return `<span class="due">Due in ${esc(humanDelta(ms))}</span><div class="muted mono">${esc(dueAt)}</div>`;
+}
+
+function computeStats(items: any[]) {
+  const totals = { items: items.length };
+  const byStatus: Record<string, number> = {};
+  const byPriority: Record<string, number> = {};
+  const byCategory: Record<string, number> = {};
+  for (const it of items) {
+    const st = (it.status || "unknown").toLowerCase();
+    const pr = (it.priority || "unknown").toLowerCase();
+    const cat = (it.category || "unknown").toLowerCase();
+    byStatus[st] = (byStatus[st] || 0) + 1;
+    byPriority[pr] = (byPriority[pr] || 0) + 1;
+    byCategory[cat] = (byCategory[cat] || 0) + 1;
+  }
+  return { totals, byStatus, byPriority, byCategory };
+}
+
+function toCsv(items: any[]) {
+  const cols = ["id","tenantId","source","sender","subject","category","priority","status","slaSeconds","dueAt","createdAt","updatedAt"];
+  const lines = [cols.join(",")];
+  for (const it of items) {
+    const row = cols.map((c) => {
+      const v = it?.[c] ?? "";
+      const s = String(v).replaceAll('"', '""');
+      return `"${s}"`;
+    });
+    lines.push(row.join(","));
+  }
+  return lines.join("\n") + "\n";
+}
+
+export function makeUiRoutes(args: { store: Store; tenants: TenantsStore; shares: ShareStore }) {
+  const r = express.Router();
+
+  r.get("/tickets", async (req, res) => {
+    const tenantId = (typeof req.query.tenantId === "string" ? req.query.tenantId : "").trim();
+    if (!tenantId) return res.status(400).send("missing_tenantId");
+
+    const token = requireTenantKey(req, tenantId, args.tenants, args.shares);
+    if (!token) return res.status(401).send("invalid_tenant_key");
+
+    const limit = Number(req.query.limit || 50);
+    const items = await args.store.listWorkItems({ tenantId, limit: Number.isFinite(limit) ? limit : 50 });
+
+    const shareToken = (typeof req.query.k === "string" && req.query.k) ? req.query.k : (typeof req.query.s === "string" ? req.query.s : "");
+    const shareLink = `/ui/tickets?tenantId=${encodeURIComponent(tenantId)}&k=${encodeURIComponent(String(shareToken || token))}`;
+
+    const rows = items.map((it: any) => `
+      <tr>
+        <td class="mono">${esc(shortId(it.id))}</td>
+        <td class="subject">${esc(it.subject || it.id)}</td>
+        <td>${badge("priority", it.priority || "unknown")}</td>
+        <td>${badge("status", it.status || "new")}</td>
+        <td>${dueCell(it.dueAt)}</td>
+        <td class="mono muted">${esc(it.sender || "-")}</td>
+      </tr>
+    `).join("");
+
+    const html = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Tickets — ${esc(tenantId)}</title>
+  <style>
+    :root{
+      --bg:#060709; --card:#0b0d10; --border:rgba(255,255,255,.08);
+      --text:#e8eaed; --muted:rgba(232,234,237,.6);
+      --green:#38d996; --red:#ff5c7a; --yellow:#f7d154; --blue:#6aa7ff;
+    }
+    body{margin:0;font-family:ui-sans-serif,system-ui;background:radial-gradient(1200px 600px at 20% 10%, rgba(56,217,150,.18), transparent 55%),
+                                              radial-gradient(1000px 500px at 70% 20%, rgba(106,167,255,.12), transparent 55%),
+                                              var(--bg); color:var(--text);}
+    .wrap{max-width:1100px;margin:28px auto;padding:0 18px;}
+    .card{background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+          border:1px solid var(--border); border-radius:18px; padding:18px 18px; box-shadow: 0 12px 40px rgba(0,0,0,.35);}
+    .top{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;}
+    h1{margin:0;font-size:26px;letter-spacing:.2px}
+    .sub{margin-top:6px;color:var(--muted);font-size:13px}
+    .actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+    .btn{border:1px solid var(--border);background:rgba(255,255,255,.04);color:var(--text);
+         padding:10px 12px;border-radius:12px;text-decoration:none;font-size:13px;cursor:pointer}
+    .btn:hover{background:rgba(255,255,255,.08)}
+    .btn.primary{background:rgba(56,217,150,.18);border-color:rgba(56,217,150,.35)}
+    .btn.primary:hover{background:rgba(56,217,150,.24)}
+    .share{margin-top:14px;display:flex;gap:10px;align-items:center}
+    .share input{flex:1;background:rgba(0,0,0,.35);border:1px dashed rgba(255,255,255,.18);color:var(--text);
+                 padding:10px 12px;border-radius:12px;font-size:12px}
+    table{width:100%;border-collapse:separate;border-spacing:0;margin-top:16px;overflow:hidden;border-radius:14px;border:1px solid var(--border)}
+    thead th{background:rgba(255,255,255,.03);text-align:left;font-size:11px;color:var(--muted);padding:12px 12px;letter-spacing:.14em}
+    tbody td{padding:14px 12px;border-top:1px solid var(--border);font-size:13px;vertical-align:top}
+    tbody tr:hover{background:rgba(255,255,255,.03)}
+    .mono{font-family:ui-monospace, SFMono-Regular, Menlo, monospace}
+    .muted{color:var(--muted)}
+    .subject{max-width:420px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .badge{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;font-size:12px;border:1px solid var(--border);background:rgba(255,255,255,.03)}
+    .prio-high{border-color:rgba(255,92,122,.35);background:rgba(255,92,122,.12)}
+    .prio-med{border-color:rgba(247,209,84,.35);background:rgba(247,209,84,.10)}
+    .prio-low{border-color:rgba(56,217,150,.35);background:rgba(56,217,150,.10)}
+    .st-new{border-color:rgba(255,255,255,.14)}
+    .st-prog{border-color:rgba(106,167,255,.35);background:rgba(106,167,255,.10)}
+    .st-done{border-color:rgba(56,217,150,.35);background:rgba(56,217,150,.08)}
+    .due{font-weight:600}
+    .due-warn{color:var(--yellow)}
+    .due-bad{color:var(--red)}
+    .foot{margin-top:12px;color:var(--muted);font-size:12px;text-align:center}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="top">
+        <div>
+          <h1>Tickets</h1>
+          <div class="sub">Tenant: <span class="mono">${esc(tenantId)}</span> • Showing ${items.length} latest</div>
+        </div>
+        <div class="actions">
+          <button class="btn" onclick="location.reload()">Refresh</button>
+          <button class="btn" onclick="copyShare()">Copy Share Link</button>
+          <a class="btn primary" href="/ui/tickets/export.csv?tenantId=${encodeURIComponent(tenantId)}&k=${encodeURIComponent(String(token))}">Export CSV</a>
+          <a class="btn" target="_blank" href="/ui/tickets/stats.json?tenantId=${encodeURIComponent(tenantId)}&k=${encodeURIComponent(String(token))}">Stats (JSON)</a>
+        </div>
+      </div>
+
+      <div class="share">
+        <input id="shareLink" readonly value="${esc(shareLink)}"/>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th style="width:140px">TICKET ID</th>
+            <th>SUBJECT</th>
+            <th style="width:110px">PRIORITY</th>
+            <th style="width:110px">STATUS</th>
+            <th style="width:240px">DUE</th>
+            <th style="width:260px">FROM</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${items.length ? rows : `<tr><td colspan="6" class="muted">No tickets yet. Send an email/WhatsApp message to create the first ticket.</td></tr>`}
+        </tbody>
+      </table>
+
+      <div class="foot">Intake-Guardian • proof UI (sellable MVP): SLA, priority, export — ready for teams.</div>
+    </div>
+  </div>
+
+  <script>
+    function copyShare(){
+      const el = document.getElementById('shareLink');
+      if(!el) return;
+      el.select(); el.setSelectionRange(0, 99999);
+      navigator.clipboard.writeText(el.value).catch(()=>{});
+    }
+  </script>
+</body>
+</html>`;
+
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    return res.send(html);
+  });
+
+  r.get("/tickets/export.csv", async (req, res) => {
+    const tenantId = (typeof req.query.tenantId === "string" ? req.query.tenantId : "").trim();
+    if (!tenantId) return res.status(400).send("missing_tenantId");
+
+    const token = requireTenantKey(req, tenantId, args.tenants, args.shares);
+    if (!token) return res.status(401).send("invalid_tenant_key");
+
+    const limit = Number(req.query.limit || 500);
+    const items = await args.store.listWorkItems({ tenantId, limit: Number.isFinite(limit) ? limit : 500 });
+
+    const csv = toCsv(items);
+    const fname = `tickets_${tenantId}_${new Date().toISOString().slice(0,10)}.csv`;
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${fname}"`);
+    return res.send(csv);
+  });
+
+  r.get("/tickets/stats.json", async (req, res) => {
+    const tenantId = (typeof req.query.tenantId === "string" ? req.query.tenantId : "").trim();
+    if (!tenantId) return res.status(400).json({ ok: false, error: "missing_tenantId" });
+
+    const token = requireTenantKey(req, tenantId, args.tenants, args.shares);
+    if (!token) return res.status(401).json({ ok: false, error: "invalid_tenant_key" });
+
+    const limit = Number(req.query.limit || 500);
+    const items = await args.store.listWorkItems({ tenantId, limit: Number.isFinite(limit) ? limit : 500 });
+
+    const stats = computeStats(items);
+    return res.json({ ok: true, tenantId, window: { latest: items.length }, ...stats });
+  });
+
+  return r;
+}

@@ -1,0 +1,5 @@
+{"source":"demo","type":"lead","lead":{"fullName":"Alice One","email":"alice@acme.dev","company":"ACME","message":"Need help with IT support"}}
+{"source":"demo","type":"lead","lead":{"fullName":"Bob Two","email":"bob@beta.dev","company":"BETA","message":"Request onboarding for new hire"}}
+{"source":"demo","type":"lead","lead":{"fullName":"Carla Three","email":"carla@carla.dev","company":"CARLA","message":"Laptop setup + access policy"}}
+{"source":"demo","type":"lead","lead":{"fullName":"Dan Four","email":"dan@delta.dev","company":"DELTA","message":"Security review + evidence pack"}}
+{"source":"demo","type":"lead","lead":{"fullName":"Eve Five","email":"eve@echo.dev","company":"ECHO","message":"Need audit trail + export CSV"}}

@@ -1,0 +1,32 @@
+import type { Request } from "express";
+import type { TenantsStore } from "../tenants/store.js";
+import type { ShareStore } from "../shares/store.js";
+
+export function requireTenantKey(
+  req: Request,
+  tenantId: string,
+  tenants?: TenantsStore,
+  shares?: ShareStore
+): { ok: true } | { ok: false; status: number; error: string } {
+
+  // 1) Share token (preferred for UI links)
+  const token = String((req.query?.t ?? "") || "").trim();
+  if (token && shares) {
+    const s = shares.get(token);
+    if (s && s.tenantId === tenantId) return { ok: true };
+    return { ok: false, status: 401, error: "invalid_share_token" };
+  }
+
+  // 2) Direct tenant key (API calls)
+  const key = String(req.header("x-tenant-key") || (req.query?.k ?? "") || "").trim();
+  if (!key) return { ok: false, status: 401, error: "missing_tenant_key" };
+
+  if (tenants) {
+    const ok = tenants.verify(tenantId, key);
+    if (!ok) return { ok: false, status: 401, error: "invalid_tenant_key" };
+    return { ok: true };
+  }
+
+  // If no tenants store wired, allow (dev)
+  return { ok: true };
+}

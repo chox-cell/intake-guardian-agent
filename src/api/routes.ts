@@ -3,6 +3,8 @@ import { z } from "zod";
 import { Store } from "../store/store.js";
 import { createAgent } from "../plugin/createAgent.js";
 import { requireTenantKey } from "./tenant-key.js";
+import { HttpError } from "./tenant-key.js";
+import { authRouter } from "./auth";
 
 export function makeRoutes(args: {
   store: Store;
@@ -24,18 +26,22 @@ export function makeRoutes(args: {
   // Core intake (generic) — expects InboundEvent contract with tenantId in body
   r.post("/intake", async (req, res) => {
     const tenantId = z.string().min(1).parse(req.body?.tenantId);
-    const tk = requireTenantKey(req, tenantId);
-    if (!tk.ok) return res.status(tk.status).json({ ok: false, error: tk.error });
-
+    try {
+      requireTenantKey(req, tenantId);
+    } catch (e) {
+  const err = e as any;    }
     const out = await agent.intake(req.body);
     res.json(out);
   });
 
   r.get("/workitems", async (req, res) => {
     const tenantId = z.string().min(1).parse(req.query.tenantId);
-    const tk = requireTenantKey(req, tenantId);
-    if (!tk.ok) return res.status(tk.status).json({ ok: false, error: tk.error });
-
+    try {
+      requireTenantKey(req, tenantId);
+    } catch (e) {
+  const err = e as any;
+      return res.status((err?.status) || 401).json({ ok: false, error: (err?.code) || "invalid_tenant_key" });
+    }
     const status = req.query.status
       ? z.enum(["new", "triage", "in_progress", "waiting", "resolved", "closed"]).parse(req.query.status)
       : undefined;
@@ -56,9 +62,12 @@ export function makeRoutes(args: {
 
   r.get("/workitems/:id", async (req, res) => {
     const tenantId = z.string().min(1).parse(req.query.tenantId);
-    const tk = requireTenantKey(req, tenantId);
-    if (!tk.ok) return res.status(tk.status).json({ ok: false, error: tk.error });
-
+    try {
+      requireTenantKey(req, tenantId);
+    } catch (e) {
+  const err = e as any;
+      return res.status((err?.status) || 401).json({ ok: false, error: (err?.code) || "invalid_tenant_key" });
+    }
     const item = await args.store.getWorkItem(tenantId, req.params.id);
     if (!item) return res.status(404).json({ ok: false, error: "not_found" });
     res.json({ ok: true, item });
@@ -66,9 +75,12 @@ export function makeRoutes(args: {
 
   r.post("/workitems/:id/status", async (req, res) => {
     const tenantId = z.string().min(1).parse(req.body.tenantId);
-    const tk = requireTenantKey(req, tenantId);
-    if (!tk.ok) return res.status(tk.status).json({ ok: false, error: tk.error });
-
+    try {
+      requireTenantKey(req, tenantId);
+    } catch (e) {
+  const err = e as any;
+      return res.status((err?.status) || 401).json({ ok: false, error: (err?.code) || "invalid_tenant_key" });
+    }
     const next = req.body.next;
     const out = await agent.updateStatus(tenantId, req.params.id, next);
 
@@ -80,9 +92,12 @@ export function makeRoutes(args: {
 
   r.post("/workitems/:id/owner", async (req, res) => {
     const tenantId = z.string().min(1).parse(req.body.tenantId);
-    const tk = requireTenantKey(req, tenantId);
-    if (!tk.ok) return res.status(tk.status).json({ ok: false, error: tk.error });
-
+    try {
+      requireTenantKey(req, tenantId);
+    } catch (e) {
+  const err = e as any;
+      return res.status((err?.status) || 401).json({ ok: false, error: (err?.code) || "invalid_tenant_key" });
+    }
     const ownerId = req.body.ownerId ?? null;
     const out = await agent.assignOwner(tenantId, req.params.id, ownerId);
 
@@ -92,9 +107,12 @@ export function makeRoutes(args: {
 
   r.get("/workitems/:id/events", async (req, res) => {
     const tenantId = z.string().min(1).parse(req.query.tenantId);
-    const tk = requireTenantKey(req, tenantId);
-    if (!tk.ok) return res.status(tk.status).json({ ok: false, error: tk.error });
-
+    try {
+      requireTenantKey(req, tenantId);
+    } catch (e) {
+  const err = e as any;
+      return res.status((err?.status) || 401).json({ ok: false, error: (err?.code) || "invalid_tenant_key" });
+    }
     const limit = req.query.limit
       ? z.coerce.number().int().min(1).max(1000).parse(req.query.limit)
       : 200;
@@ -105,3 +123,4 @@ export function makeRoutes(args: {
 
   return r;
 }
+

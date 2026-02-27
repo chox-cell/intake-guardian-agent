@@ -12,12 +12,14 @@ import { verifyWhatsAppSignature, verifyWhatsAppMessageAge } from "./verify-what
 import type { RawBodyRequest } from "./raw-body.js";
 import { makeRateLimiter } from "./rate-limit.js";
 import { requireTenantKey } from "./tenant-key.js";
+import { HttpError } from "./tenant-key.js";
 
-import type { ShareStore } from "../share/store.js";
+import type { ShareStore } from "../shares/store.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 export function makeAdapterRoutes(args: {
+
   tenants?: TenantsStore;
   store: Store;
   presetId: string;
@@ -26,6 +28,7 @@ export function makeAdapterRoutes(args: {
   mailer?: ResendMailer;
   shares?: ShareStore;
   publicBaseUrl?: string;
+
 
 }) {
   const r = Router();
@@ -41,9 +44,10 @@ export function makeAdapterRoutes(args: {
   // --- Resend webhook (JSON) ---
   r.post("/email/resend", async (req, res) => {
     const tenantId = z.string().min(1).parse(req.query.tenantId);
-    const tk = requireTenantKey(req, tenantId, args.tenants);
-    if (!tk.ok) return res.status(tk.status).json({ ok: false, error: tk.error });
-
+    try {
+      requireTenantKey(req, tenantId, args.tenants, args.shares);
+    } catch (e) {
+  const err = e as any;    }
     const v = verifyResendWebhook(req as RawBodyRequest);
     if (!v.ok) return res.status(401).json({ ok: false, error: v.error });
 
@@ -54,6 +58,38 @@ export function makeAdapterRoutes(args: {
 
   // --- SendGrid inbound parse (multipart/form-data) ---
   r.post("/email/sendgrid", upload.any(), async (req, res) => {
+    // INTAKE_GUARDIAN__RESEND_RECEIPT_INTERCEPT
+    // Send a receipt email after successful ingest (non-blocking).
+    const _json = res.json.bind(res);
+    res.json = (body: any) => {
+      try {
+        const tenantIdQ = String(req.query.tenantId || "");
+        const workItem = body?.workItem;
+        if (args.mailer && workItem?.sender) {
+          // safe share token link (no tenant key)
+          const token = args.shares?.create(tenantIdQ)?.token;
+          const base = (args.publicBaseUrl || "").trim() || (req.protocol + "://" + req.get("host"));
+          const link = token
+            ? `${base}/ui/tickets?tenantId=${encodeURIComponent(tenantIdQ)}&t=${encodeURIComponent(token)}`
+            : `${base}/ui/tickets?tenantId=${encodeURIComponent(tenantIdQ)}`;
+          (
+  // @ts-ignore
+  (args.mailer.sendTicketReceipt ? args.mailer.sendTicketReceipt.bind(args.mailer) : args.mailer.sendReceipt.bind(args.mailer))
+)({
+            to: workItem.sender,
+            subject: "Ticket created: " + (workItem.subject || workItem.id),
+            ticketId: workItem.id,
+            tenantId: tenantIdQ,
+            dueAtISO: workItem.dueAt,
+            slaSeconds: workItem.slaSeconds,
+            priority: workItem.priority,
+            link
+          }).catch(() => {});
+        }
+      } catch {}
+      return _json(body);
+    };
+
     // Receipt mail interceptor (Resend) — reads payload.workItem safely
     const __json = res.json.bind(res);
     res.json = ((payload: any) => {
@@ -87,9 +123,12 @@ export function makeAdapterRoutes(args: {
     }) as any;
 
     const tenantId = z.string().min(1).parse(req.query.tenantId);
-    const tk = requireTenantKey(req, tenantId, args.tenants);
-    if (!tk.ok) return res.status(tk.status).json({ ok: false, error: tk.error });
-
+    try {
+      requireTenantKey(req, tenantId, args.tenants, args.shares);
+    } catch (e) {
+  const err = e as any;
+      return res.status((err?.status) || 401).json({ ok: false, error: (err?.code) || "invalid_tenant_key" });
+    }
     const body = req.body || {};
     const from = String(body.from || "").trim();
     const subject = String(body.subject || "").trim();
@@ -136,9 +175,12 @@ export function makeAdapterRoutes(args: {
   // --- WhatsApp Cloud messages (POST) ---
   r.post("/whatsapp/cloud", async (req, res) => {
     const tenantId = z.string().min(1).parse(req.query.tenantId);
-    const tk = requireTenantKey(req, tenantId, args.tenants);
-    if (!tk.ok) return res.status(tk.status).json({ ok: false, error: tk.error });
-
+    try {
+      requireTenantKey(req, tenantId, args.tenants, args.shares);
+    } catch (e) {
+  const err = e as any;
+      return res.status((err?.status) || 401).json({ ok: false, error: (err?.code) || "invalid_tenant_key" });
+    }
     const sig = verifyWhatsAppSignature(req as RawBodyRequest);
     if (!sig.ok) return res.status(401).json({ ok: false, error: sig.error });
 

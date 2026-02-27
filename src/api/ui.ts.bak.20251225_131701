@@ -1,0 +1,185 @@
+import type { Request, Response } from "express";
+import { Router } from "express";
+import { z } from "zod";
+import type { Store } from "../store/store.js";
+import type { TenantsStore } from "../tenants/store.js";
+import type { ShareStore } from "../shares/store.js";
+import { requireTenantKey } from "./tenant-key.js";
+
+function htmlEscape(s: string) {
+  return s.replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c] as string));
+}
+
+function fmtDue(dueAtISO?: string) {
+  if (!dueAtISO) return "-";
+  try {
+    const d = new Date(dueAtISO);
+    return d.toISOString().replace("T"," ").replace("Z"," UTC");
+  } catch {
+    return dueAtISO;
+  }
+}
+
+export function makeUiRoutes(args: { store: Store; tenants: TenantsStore; shares: ShareStore }) {
+  const r = Router();
+
+  r.get("/tickets", async (req: Request, res: Response) => {
+    const tenantId = z.string().min(1).parse(req.query.tenantId);
+    const gate = requireTenantKey(req, tenantId, args.tenants, args.shares);
+    if (!gate.ok) return res.status(gate.status).type("text/html").send(`<pre>${gate.error}</pre>`);
+
+    const limit = Number(req.query.limit || 25);
+    const items = await args.store.listWorkItems(tenantId, { limit: Math.min(Math.max(limit, 1), 100), offset: 0 });
+
+    // Share token for safe link (no tenantKey)
+    const share = args.shares.create(tenantId);
+    const base = `${req.protocol}://${req.get("host")}`;
+    const shareLink = `/ui/tickets?tenantId=${encodeURIComponent(tenantId)}&t=${encodeURIComponent(share.token)}`;
+    const exportLink = `/ui/export.csv?tenantId=${encodeURIComponent(tenantId)}&t=${encodeURIComponent(share.token)}`;
+    const statsLink  = `/ui/stats.json?tenantId=${encodeURIComponent(tenantId)}&t=${encodeURIComponent(share.token)}`;
+
+    const rows = items.map((it) => {
+      const id = htmlEscape(it.id);
+      const subject = htmlEscape(it.subject || "(no subject)");
+      const from = htmlEscape(it.sender || "-");
+      const priority = htmlEscape(it.priority);
+      const status = htmlEscape(it.status);
+      const due = htmlEscape(fmtDue(it.dueAt));
+      return `
+        <tr>
+          <td class="mono">${id}</td>
+          <td>${subject}</td>
+          <td><span class="pill">${priority}</span></td>
+          <td><span class="pill2">${status}</span></td>
+          <td class="mono">${due}</td>
+          <td class="mono">${from}</td>
+        </tr>`;
+    }).join("");
+
+    const html = `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Tickets — ${tenantId}</title>
+<style>
+  :root{
+    --bg:#0b0b10; --card:#11121a; --muted:#9aa3b2; --text:#eef2ff;
+    --line:rgba(255,255,255,.08); --accent:#34d399; --accent2:#60a5fa;
+  }
+  *{box-sizing:border-box}
+  body{margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+       background: radial-gradient(1200px 800px at 10% 10%, rgba(52,211,153,.10), transparent 55%),
+                   radial-gradient(900px 600px at 90% 20%, rgba(96,165,250,.10), transparent 55%),
+                   var(--bg);
+       color:var(--text);}
+  .wrap{max-width:1100px; margin:0 auto; padding:28px 18px 60px;}
+  .card{background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03));
+        border:1px solid var(--line); border-radius:18px; padding:18px 18px 14px;
+        box-shadow: 0 18px 60px rgba(0,0,0,.45); backdrop-filter: blur(14px);}
+  h1{margin:0 0 6px; font-size:22px; letter-spacing:.2px}
+  .sub{color:var(--muted); font-size:13px}
+  .top{display:flex; gap:12px; align-items:center; justify-content:space-between; flex-wrap:wrap;}
+  .btns{display:flex; gap:10px; flex-wrap:wrap;}
+  a.btn{display:inline-flex; align-items:center; gap:8px; padding:10px 12px; border-radius:12px;
+        border:1px solid var(--line); color:var(--text); text-decoration:none; font-size:13px;}
+  a.btn:hover{border-color:rgba(255,255,255,.16)}
+  a.primary{background:rgba(52,211,153,.12); border-color:rgba(52,211,153,.25)}
+  a.blue{background:rgba(96,165,250,.12); border-color:rgba(96,165,250,.25)}
+  .share{margin-top:12px; padding:10px 12px; border-radius:12px; border:1px dashed var(--line);
+         color:var(--muted); font-size:12px; overflow:auto}
+  table{width:100%; border-collapse:separate; border-spacing:0; margin-top:14px; overflow:hidden}
+  thead th{font-size:11px; text-transform:uppercase; letter-spacing:.12em; color:var(--muted);
+           text-align:left; padding:10px 12px; border-bottom:1px solid var(--line)}
+  tbody td{padding:12px; border-bottom:1px solid rgba(255,255,255,.06); vertical-align:top}
+  tbody tr:hover{background:rgba(255,255,255,.03)}
+  .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size:12px}
+  .pill{display:inline-block; padding:4px 8px; border-radius:999px; background:rgba(52,211,153,.12);
+        border:1px solid rgba(52,211,153,.25); font-size:12px}
+  .pill2{display:inline-block; padding:4px 8px; border-radius:999px; background:rgba(96,165,250,.12);
+        border:1px solid rgba(96,165,250,.25); font-size:12px}
+  .foot{margin-top:10px; color:var(--muted); font-size:12px}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="top">
+        <div>
+          <h1>Tickets</h1>
+          <div class="sub">Tenant: <span class="mono">${htmlEscape(tenantId)}</span> • Showing ${items.length} latest</div>
+        </div>
+        <div class="btns">
+          <a class="btn" href="${shareLink}">Refresh</a>
+          <a class="btn blue" href="${statsLink}" target="_blank">Stats (JSON)</a>
+          <a class="btn primary" href="${exportLink}">Export CSV</a>
+        </div>
+      </div>
+
+      <div class="share">
+        Share link (safe token — no tenant key): <span class="mono">${htmlEscape(shareLink)}</span>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Ticket ID</th><th>Subject</th><th>Priority</th><th>Status</th><th>Due</th><th>From</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows || `<tr><td colspan="6" class="sub">No tickets yet.</td></tr>`}
+        </tbody>
+      </table>
+
+      <div class="foot">Intake-Guardian — sellable MVP • Export + Stats + SLA proof</div>
+    </div>
+  </div>
+</body>
+</html>`;
+
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.status(200).send(html);
+  });
+
+  r.get("/export.csv", async (req, res) => {
+    const tenantId = z.string().min(1).parse(req.query.tenantId);
+    const gate = requireTenantKey(req, tenantId, args.tenants, args.shares);
+    if (!gate.ok) return res.status(gate.status).type("text/plain").send(gate.error);
+
+    const items = await args.store.listWorkItems(tenantId, { limit: 500, offset: 0 });
+
+    const header = "id,tenantId,source,sender,subject,category,priority,status,slaSeconds,dueAt,createdAt,updatedAt";
+    const lines = items.map((it) => {
+      const esc = (v: any) => `"${String(v ?? "").replace(/"/g,'""')}"`;
+      return [
+        esc(it.id), esc(it.tenantId), esc(it.source), esc(it.sender), esc(it.subject),
+        esc(it.category), esc(it.priority), esc(it.status), esc(it.slaSeconds),
+        esc(it.dueAt), esc(it.createdAt), esc(it.updatedAt)
+      ].join(",");
+    });
+
+    const csv = [header, ...lines].join("\n") + "\n";
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="tickets_${tenantId}.csv"`);
+    res.status(200).send(csv);
+  });
+
+  r.get("/stats.json", async (req, res) => {
+    const tenantId = z.string().min(1).parse(req.query.tenantId);
+    const gate = requireTenantKey(req, tenantId, args.tenants, args.shares);
+    if (!gate.ok) return res.status(gate.status).json({ ok: false, error: gate.error });
+
+    const items = await args.store.listWorkItems(tenantId, { limit: 200, offset: 0 });
+    const byStatus: Record<string, number> = {};
+    const byPriority: Record<string, number> = {};
+    const byCategory: Record<string, number> = {};
+    for (const it of items) {
+      byStatus[it.status] = (byStatus[it.status] || 0) + 1;
+      byPriority[it.priority] = (byPriority[it.priority] || 0) + 1;
+      byCategory[it.category] = (byCategory[it.category] || 0) + 1;
+    }
+    res.json({ ok: true, tenantId, window: { latest: 200 }, totals: { items: items.length }, byStatus, byPriority, byCategory });
+  });
+
+  return r;
+}

@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(pwd)"
+cd "$ROOT"
+
+FILE="scripts/smoke-phase39.sh"
+[ -f "$FILE" ] || { echo "ERROR: $FILE missing (run Phase39 oneshot first)"; exit 1; }
+
+cp "$FILE" "${FILE}.bak.$(date +%Y%m%d_%H%M%S)"
+echo "✅ backup -> ${FILE}.bak.*"
+
+cat > "$FILE" <<'SMOKE'
+#!/usr/bin/env bash
+set -euo pipefail
+
+BASE_URL="${BASE_URL:-http://127.0.0.1:7090}"
+ADMIN_KEY="${ADMIN_KEY:?missing ADMIN_KEY}"
+
+fail(){ echo "FAIL: $*"; exit 1; }
+
+echo "BASE_URL=$BASE_URL"
+echo "==> health"
+curl -fsS "$BASE_URL/health" >/dev/null || fail "health failed"
+
+echo "==> get tenant from /ui/admin Location (macOS-safe)"
+hdr="$(curl -sS -D- -o /dev/null "$BASE_URL/ui/admin?admin=$ADMIN_KEY" | tr -d '\r')"
+loc="$(printf "%s\n" "$hdr" | grep -i '^location:' | head -n1 | sed -E 's/^[Ll]ocation:[[:space:]]*//')"
+
+if [ -z "$loc" ]; then
+  echo "---- debug headers ----"
+  echo "$hdr"
+  fail "no Location header"
+fi
+
+echo "Location=$loc"
+
+q="${loc#*\?}"
+TENANT_ID="$(echo "$q" | sed -n 's/.*[?&]tenantId=\([^&]*\).*/\1/p')"
+TENANT_KEY="$(echo "$q" | sed -n 's/.*[?&]k=\([^&]*\).*/\1/p')"
+
+[ -n "$TENANT_ID" ] || fail "tenantId parse failed"
+[ -n "$TENANT_KEY" ] || fail "k parse failed"
+
+DECISIONS="$BASE_URL/ui/decisions?tenantId=$TENANT_ID&k=$TENANT_KEY"
+DEMO="$BASE_URL/ui/decisions/demo?tenantId=$TENANT_ID&k=$TENANT_KEY"
+
+echo "TENANT_ID=$TENANT_ID"
+echo "TENANT_KEY=${TENANT_KEY:0:8}…"
+
+echo "==> decisions 200"
+curl -s -o /dev/null -w "%{http_code}" "$DECISIONS" | grep -q 200 || fail "decisions not 200"
+
+echo "==> demo generator 302"
+curl -fsSI "$DEMO" | grep -q "302" || fail "demo not 302"
+
+echo "==> decisions still 200"
+curl -s -o /dev/null -w "%{http_code}" "$DECISIONS" | grep -q 200 || fail "decisions not 200 after demo"
+
+echo
+echo "✅ Phase39 smoke OK"
+echo "Open:"
+echo "  $DECISIONS"
+SMOKE
+
+chmod +x "$FILE"
+echo "✅ fixed $FILE (Location parsing macOS-safe)"

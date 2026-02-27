@@ -1,0 +1,25 @@
+{
+  "agentName": "Jules",
+  "guardrails": {
+    "denyPaths": [
+      ".env",
+      ".env.*",
+      "data/**",
+      "**/*.pem",
+      "**/*secret*",
+      "**/*token*"
+    ],
+    "allowCommands": [
+      "pnpm -s typecheck",
+      "pnpm -s test",
+      "pnpm -s integrity:generate",
+      "pnpm -s integrity:verify",
+      "node -v",
+      "pnpm -v"
+    ],
+    "requiredBeforeCommit": [
+      "pnpm -s typecheck",
+      "pnpm -s integrity:verify"
+    ]
+  }
+}

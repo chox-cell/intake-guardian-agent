@@ -20,6 +20,19 @@
     "__bak_resend_*",
     "__bak_fix_*",
     "__bak_ui_v*",
-    "__bak_ui_*"
+    "__bak_ui_*",
+    "__bak_phase2_*",
+    "__bak_phase*",
+    "__bak_phase3_*",
+    "**/__bak_*",
+    "**/__bak*/**",
+    "src/__bak_*",
+    "scripts/__bak_*",
+    ".backup",
+    ".backup/**",
+    "data",
+    "dist/**",
+    "__bak_phase30b_*",
+    "__bak_phase30c_*"
   ]
 }

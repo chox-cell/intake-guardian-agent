@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BASE_URL="${BASE_URL:-http://127.0.0.1:7090}"
+ADMIN_KEY="${ADMIN_KEY:-}"
+fail(){ echo "FAIL: $*"; exit 1; }
+
+[ -n "$ADMIN_KEY" ] || fail "missing ADMIN_KEY"
+
+echo "==> health"
+curl -fsS "$BASE_URL/health" >/dev/null || fail "health failed"
+
+echo "==> tenant from /ui/admin Location"
+hdr="$(curl -sS -D- -o /dev/null "$BASE_URL/ui/admin?admin=$ADMIN_KEY" | tr -d '\r')"
+loc="$(printf "%s\n" "$hdr" | awk -F': ' 'BEGIN{IGNORECASE=1} $1=="location"{print $2; exit}')"
+[ -n "$loc" ] || { echo "$hdr"; fail "no Location header"; }
+
+TENANT_ID="$(echo "$loc" | sed -n 's/.*tenantId=\([^&]*\).*/\1/p')"
+TENANT_KEY="$(echo "$loc" | sed -n 's/.*[?&]k=\([^&]*\).*/\1/p')"
+[ -n "$TENANT_ID" ] || fail "tenantId parse failed"
+[ -n "$TENANT_KEY" ] || fail "k parse failed"
+
+echo "TENANT_ID=$TENANT_ID"
+echo "TENANT_KEY=$TENANT_KEY"
+
+echo "==> create decision (zip pack)"
+resp="$(curl -sS -X POST "$BASE_URL/api/decision/create?tenantId=$TENANT_ID&k=$TENANT_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"Refund Decision","decision":"refund","notes":"Client requested refund; proof logged."}')"
+
+echo "$resp" | grep -q '"ok":true' || { echo "$resp"; fail "decision create failed"; }
+
+packId="$(echo "$resp" | python3 - <<'PY'
+import json,sys
+j=json.loads(sys.stdin.read())
+print(j["pack"]["packId"])
+PY
+)"
+
+echo "PACK_ID=$packId"
+
+echo "==> download zip"
+curl -fsS -o "/tmp/${packId}.zip" "$BASE_URL/api/pack/${packId}/download.zip?tenantId=$TENANT_ID&k=$TENANT_KEY" || fail "zip download failed"
+[ -s "/tmp/${packId}.zip" ] || fail "zip empty"
+
+echo "==> /ui/decisions 200"
+code="$(curl -sS -o /dev/null -w '%{http_code}' "$BASE_URL/ui/decisions?tenantId=$TENANT_ID&k=$TENANT_KEY")"
+[ "$code" = "200" ] || fail "ui decisions not 200 (got $code)"
+
+echo
+echo "✅ Phase37 smoke OK"
+echo "UI:"
+echo "  $BASE_URL/ui/decisions?tenantId=$TENANT_ID&k=$TENANT_KEY"
+echo "ZIP:"
+echo "  /tmp/${packId}.zip"

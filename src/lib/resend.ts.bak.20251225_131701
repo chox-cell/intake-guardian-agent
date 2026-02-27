@@ -1,0 +1,53 @@
+type Receipt = {
+  to: string;
+  subject: string;
+  ticketId: string;
+  tenantId: string;
+  dueAtISO?: string;
+  slaSeconds?: number;
+  priority?: string;
+  link: string;
+};
+
+export class ResendMailer {
+  constructor(private cfg: { apiKey: string; from: string; publicBaseUrl: string; dryRun?: boolean }) {}
+
+  async sendTicketReceipt(r: Receipt) {
+    const dry = Boolean(this.cfg.dryRun);
+    const html = `
+      <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; line-height:1.5">
+        <h2 style="margin:0 0 10px">✅ Ticket received</h2>
+        <p style="margin:0 0 8px">Ticket ID: <b>${r.ticketId}</b></p>
+        <p style="margin:0 0 8px">Priority: <b>${r.priority || "-"}</b></p>
+        <p style="margin:0 0 8px">Due: <b>${r.dueAtISO || "-"}</b></p>
+        <p style="margin:12px 0 0">
+          View tickets: <a href="${r.link}">${r.link}</a>
+        </p>
+        <p style="color:#666; margin:14px 0 0; font-size:12px">Intake-Guardian (MVP)</p>
+      </div>
+    `.trim();
+
+    if (dry) return { ok: true, dryRun: true };
+
+    // Resend REST API
+    const resp = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${this.cfg.apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        from: this.cfg.from,
+        to: r.to,
+        subject: r.subject,
+        html
+      })
+    });
+
+    if (!resp.ok) {
+      const t = await resp.text().catch(() => "");
+      throw new Error(`resend_failed status=${resp.status} body=${t.slice(0,200)}`);
+    }
+    return { ok: true };
+  }
+}

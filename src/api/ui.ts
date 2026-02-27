@@ -1,6 +1,9 @@
 import { Router } from "express";
+
+function __authCode(e: any){ return String(e?.code || e?.message || "invalid_tenant_key"); }
 import type { Store } from "../store/store.js";
 import { requireTenantKey } from "./tenant-key.js";
+import { HttpError } from "./tenant-key.js";
 import type { TenantsStore } from "../tenants/store.js";
 
 function esc(s: any) {
@@ -40,9 +43,42 @@ export function makeUiRoutes(args: { store: Store; tenants?: TenantsStore }) {
     // Allow passing tenant key via ?k=... (dev). Map it to header expected by requireTenantKey.
     if (k) (req.headers as any)["x-tenant-key"] = k;
 
-    const tk = requireTenantKey(req as any, tenantId, args.tenants);
-    if (!tk.ok) return res.status(tk.status).send(`<pre>${esc(tk.error)}</pre>`);
+    try {
+      requireTenantKey(req as any, tenantId, args.tenants);
+    } catch (e) {
+  const err = e as any;
 
+// Phase48b (dev-only): bypass tenant key for local demo E2E
+// Rule: if NODE_ENV=development AND tenantId=demo AND (k or x-tenant-key) == ADMIN_KEY => allow
+try {
+  const __dev = (process.env.NODE_ENV || "development") === "development";
+  const __tenantId = String((req?.query?.tenantId ?? req?.query?.tenant ?? (req as any)?.params?.tenantId ?? "") || "");
+  const __k = String((req?.query?.k ?? req?.headers?.["x-tenant-key"] ?? req?.headers?.["x-tenant-token"] ?? "") || "");
+  const __admin = String(process.env.ADMIN_KEY || "");
+  if (false && __dev && __tenantId === "demo" && __admin && __k === __admin) {
+    // allow (skip invalid_tenant_key)
+  } else {
+    throw new Error("no-bypass");
+  }
+} catch (_e) {
+  // no bypass; continue normal invalid_tenant_key path
+}
+
+// Phase48b guard: only emit invalid_tenant_key if dev bypass did NOT match
+try {
+  const __dev = (process.env.NODE_ENV || "development") === "development";
+  const __tenantId = String((req?.query?.tenantId ?? req?.query?.tenant ?? (req as any)?.params?.tenantId ?? "") || "");
+  const __k = String((req?.query?.k ?? req?.headers?.["x-tenant-key"] ?? req?.headers?.["x-tenant-token"] ?? "") || "");
+  const __admin = String(process.env.ADMIN_KEY || "");
+  const __bypass = (false && __dev && __tenantId === "demo" && __admin && __k === __admin);
+  if (!__bypass) {
+          return res.status((err?.status) || 401).send(`<pre>${esc(__authCode(err))}</pre>`);
+  }
+} catch (_e) {
+  // if guard fails, fall back to original invalid response
+      return res.status((err?.status) || 401).send(`<pre>${esc(__authCode(err))}</pre>`);
+}
+    }
     const q: any = { limit, offset: 0 };
     if (status) q.status = status;
     if (search) q.search = search;
@@ -174,6 +210,7 @@ async function setStatus(id, next) {
     }
     location.reload();
   } catch (e) {
+  const err = e as any;
     alert('Error: ' + e);
   }
 }
@@ -195,9 +232,12 @@ async function setStatus(id, next) {
     if (!tenantId) return res.status(400).send("missing_tenantId");
 
     if (k) (req.headers as any)["x-tenant-key"] = k;
-    const tk = requireTenantKey(req as any, tenantId, args.tenants);
-    if (!tk.ok) return res.status(tk.status).send(tk.error);
-
+    try {
+      requireTenantKey(req as any, tenantId, args.tenants);
+    } catch (e) {
+  const err = e as any;
+      return res.status((err?.status) || 401).send(`<pre>${esc(__authCode(err))}</pre>`);
+    }
     const q: any = { limit, offset: 0 };
     if (status) q.status = status;
     if (search) q.search = search;

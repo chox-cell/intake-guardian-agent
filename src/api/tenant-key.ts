@@ -1,48 +1,47 @@
 import type { Request } from "express";
-import type { TenantsStore } from "../tenants/store.js";
+import { verifyTenantKeyLocal } from "../lib/tenant_registry.js";
 
-function safeJson(s: string) {
-  try { return JSON.parse(s); } catch { return null; }
+export class HttpError extends Error {
+  status: number;
+  code: string;
+  constructor(status: number, code: string, message?: string) {
+    super(message || code);
+    this.status = status;
+    this.code = code;
+  }
 }
 
-function getKeyFromReq(req: Request): string {
-  const h = (req.header("x-tenant-key") || "").trim();
+function extractTenantKey(req: Request): string {
+  // priority: query k -> header -> bearer -> body
+  const q = (req.query as any)?.k;
+  if (typeof q === "string" && q) return q;
+
+  const h = req.header("x-tenant-key") || req.header("x-tenant") || "";
   if (h) return h;
 
-  // UI links: /ui/...?k=TENANT_KEY
-  const q = (typeof req.query.k === "string" ? req.query.k : "").trim();
-  if (q) return q;
+  const a = req.header("authorization") || "";
+  if (a.startsWith("Bearer ")) return a.slice(7);
 
-  // optional: body.k
-  const b = (req.body && typeof (req.body as any).k === "string" ? (req.body as any).k : "").trim();
-  if (b) return b;
+  const b: any = (req as any).body;
+  if (b && typeof b.k === "string") return b.k;
+  if (b && typeof b.tenantKey === "string") return b.tenantKey;
 
   return "";
 }
 
-export function requireTenantKey(req: Request, tenantId: string, tenantsStore?: TenantsStore, _ignored?: any) {
-  const key = getKeyFromReq(req);
+/**
+ * Backward-compatible requireTenantKey:
+ * - requireTenantKey(req, tenantId)
+ * - requireTenantKey(req, tenantId, tenants, shares)  (ignored)
+ * - requireTenantKey(req, tenantId, tenants)
+ * returns tenantKey string or throws HttpError
+ */
+export function requireTenantKey(req: Request, tenantId: string, _tenants?: any, _shares?: any): string {
+  const k = extractTenantKey(req);
+  if (!k) throw new HttpError(401, "missing_tenant_key", "Missing tenant key");
 
-  if (!key) {
-    return { ok: false as const, status: 401, error: "missing_tenant_key" as const };
-  }
+  const ok = verifyTenantKeyLocal(tenantId, k);
+  if (!ok) throw new HttpError(401, "invalid_tenant_key", "Bad tenant key");
 
-  // Preferred: TenantsStore (dynamic tenants created via admin)
-  if (tenantsStore) {
-    const ok = tenantsStore.verify(tenantId, key);
-    if (!ok) return { ok: false as const, status: 401, error: "invalid_tenant_key" as const };
-    return { ok: true as const, status: 200, key };
-  }
-
-  // Fallback: TENANT_KEYS_JSON for dev
-  const raw = (process.env.TENANT_KEYS_JSON || "").trim();
-  if (!raw) {
-    return { ok: false as const, status: 500, error: "tenant_keys_not_configured" as const };
-  }
-  const obj = safeJson(raw);
-  const expected = obj && typeof obj[tenantId] === "string" ? String(obj[tenantId]) : "";
-  if (!expected || expected !== key) {
-    return { ok: false as const, status: 401, error: "invalid_tenant_key" as const };
-  }
-  return { ok: true as const, status: 200, key };
+  return k;
 }
