@@ -23,6 +23,11 @@ type RegistryDoc = {
   updatedAtUtc?: string;
 };
 
+// In-memory cache to avoid hitting disk/parsing on every auth check
+// Map<canonicalPath, { mtime: number, doc: RegistryDoc }>
+type CacheEntry = { mtime: number; doc: RegistryDoc };
+const _memCache = new Map<string, CacheEntry>();
+
 const CANON_FILE = "tenant_registry.v1.json";
 
 // Legacy files we’ve seen in the project history / data dir
@@ -120,6 +125,22 @@ function loadRegistryDoc(dataDirAbs: string): RegistryDoc {
   ensureDir(dataDirAbs);
 
   const canonAbs = canonicalPath(dataDirAbs);
+
+  // 1. Check cache validity via mtime
+  let mtime = 0;
+  try {
+    mtime = fs.statSync(canonAbs).mtimeMs;
+  } catch {
+    // file missing
+  }
+
+  // If cache is fresh, return it
+  const cached = _memCache.get(canonAbs);
+  if (cached && cached.mtime > 0 && mtime === cached.mtime) {
+    return cached.doc;
+  }
+
+  // 2. Load from disk
   const canonDoc = safeReadJson(canonAbs);
   const canonTenants = normalizeTenantsDoc(canonDoc);
 
@@ -152,17 +173,47 @@ function loadRegistryDoc(dataDirAbs: string): RegistryDoc {
     .filter((t) => t.tenantId && t.tenantKey)
     .sort((a, b) => String(a.createdAtUtc || "").localeCompare(String(b.createdAtUtc || "")));
 
-  return {
+  const finalDoc: RegistryDoc = {
     version: 1,
     tenants,
     updatedAtUtc: nowUtc(),
   };
+
+  // 3. Persist merge if needed (eager migration) and update cache
+  // We compare against what we just loaded from canonical to see if we added anything from legacy
+  const prevSig = canonTenants.map((t) => `${t.tenantId}:${t.tenantKey}`).join("|");
+  const nextSig = tenants.map((t) => `${t.tenantId}:${t.tenantKey}`).join("|");
+
+  if (prevSig !== nextSig) {
+    fs.writeFileSync(canonAbs, JSON.stringify(finalDoc, null, 2) + "\n", "utf8");
+    try {
+        mtime = fs.statSync(canonAbs).mtimeMs;
+    } catch { }
+  }
+
+  _memCache.set(canonAbs, { mtime, doc: finalDoc });
+
+  return finalDoc;
 }
 
 function writeCanonicalIfChanged(dataDirAbs: string, doc: RegistryDoc) {
   const canonAbs = canonicalPath(dataDirAbs);
-  const prev = safeReadJson(canonAbs);
-  const prevList = normalizeTenantsDoc(prev);
+  // Note: We don't read from disk here to compare anymore to avoid extra I/O,
+  // we assume the caller has modified `doc` relative to what was loaded.
+  // But to be safe and match signature, we'll write.
+  // Optimization: compare with cache if available?
+
+  // The original implementation read from disk.
+  // Let's optimize: compare with _memCache if available, else read disk.
+  let prevList: TenantRecord[] = [];
+  const cached = _memCache.get(canonAbs);
+  if (cached) {
+    prevList = cached.doc.tenants;
+  } else {
+    const prev = safeReadJson(canonAbs);
+    prevList = normalizeTenantsDoc(prev);
+  }
+
   const nextList = doc.tenants;
 
   // cheap equality: count + ids+keys
@@ -171,6 +222,15 @@ function writeCanonicalIfChanged(dataDirAbs: string, doc: RegistryDoc) {
   if (prevSig === nextSig) return;
 
   fs.writeFileSync(canonAbs, JSON.stringify(doc, null, 2) + "\n", "utf8");
+
+  // Update cache
+  let newMtime = 0;
+  try {
+    newMtime = fs.statSync(canonAbs).mtimeMs;
+  } catch {
+    newMtime = 0;
+  }
+  _memCache.set(canonAbs, { mtime: newMtime, doc });
 }
 
 function randKey32() {
@@ -181,14 +241,14 @@ function randKey32() {
 export function listTenants(dataDirAbs?: string): TenantRecord[] {
   const dir = path.resolve(dataDirAbs || process.env.DATA_DIR || "./data");
   const doc = loadRegistryDoc(dir);
-  writeCanonicalIfChanged(dir, doc);
+  // No need to call writeCanonicalIfChanged here, loadRegistryDoc handles eager merge/save
   return doc.tenants;
 }
 
 export function getTenant(tenantId: string, dataDirAbs?: string): TenantRecord | null {
   const dir = path.resolve(dataDirAbs || process.env.DATA_DIR || "./data");
   const doc = loadRegistryDoc(dir);
-  writeCanonicalIfChanged(dir, doc);
+  // No need to call writeCanonicalIfChanged here
   const t = doc.tenants.find((x) => x.tenantId === tenantId);
   return t || null;
 }
