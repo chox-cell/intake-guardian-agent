@@ -11,6 +11,7 @@
     "db:init": "node dist/scripts/db-init.js",
     "smoke": "bash scripts/smoke.sh",
     "lint:types": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test src/**/*.test.ts",
     "smoke:day5": "bash scripts/smoke-day5.sh",
     "smoke:c": "bash scripts/smoke-c-ui.sh",
     "integrity:generate": "tsx scripts/integrity-generate.ts",
