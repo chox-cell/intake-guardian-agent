@@ -6,7 +6,8 @@ BASE="http://localhost:${PORT}/api"
 TENANT="tenant_demo"
 
 echo "[1] health..."
-curl -s "${BASE}/health" | grep -q '"ok":true' && echo "OK"
+# Updated to match the actual route: /health (not /api/health)
+curl -s "http://localhost:${PORT}/health" | grep -q '"ok":true' && echo "OK"
 
 echo "[2] intake create..."
 OUT=$(curl -s "${BASE}/intake" \
