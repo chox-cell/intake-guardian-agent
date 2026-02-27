@@ -2,19 +2,18 @@ import type { Express, Request, Response } from "express";
 import archiver from "archiver";
 import { listTickets, setTicketStatus, ticketsToCsv, sha256Text } from "../lib/ticket-store";
 import { uiAuth } from "../lib/ui-auth";
-
-function htmlEscape(s: string) {
-  return (s || "")
-    .replace(/&/g,"&amp;")
-    .replace(/</g,"&lt;")
-    .replace(/>/g,"&gt;")
-    .replace(/"/g,"&quot;");
-}
+import { html, sanitizeUrl } from "../lib/html";
 
 function baseUrl(req: Request) {
   const proto = String((req.headers["x-forwarded-proto"] as any) || ((req.socket as any).encrypted ? "https" : "http"));
   const host = String((req.headers["x-forwarded-host"] as any) || req.headers.host || "127.0.0.1");
-  return `${proto}://${host}`;
+
+  // Security Fix: Sanitize proto and host
+  const safeProto = (proto === 'https' || proto === 'http') ? proto : 'http';
+  // Allow only alphanumeric, dashes, dots, and colons (for ports)
+  const safeHost = host.replace(/[^a-zA-Z0-9-.:]/g, "");
+
+  return `${safeProto}://${safeHost}`;
 }
 
 function link(req: Request, path: string, tenantId: string, k: string) {
@@ -27,7 +26,7 @@ export function mountUi(app: Express) {
   app.get("/ui/welcome", (req, res) => {
     const b = baseUrl(req);
     res.setHeader("content-type","text/html; charset=utf-8");
-    res.end(`<!doctype html>
+    res.end(html`<!doctype html>
 <html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Intake Guardian</title>
 <style>
@@ -46,7 +45,7 @@ a{color:#22d3ee;text-decoration:none}
     <div class="h">Intake Guardian</div>
     <div class="m">
       Open your <b>Pilot Link</b> from provision (tenantId + k).<br/>
-      Base URL: <code>${htmlEscape(b)}</code>
+      Base URL: <code>${b}</code>
     </div>
   </div>
 </div>
@@ -63,7 +62,7 @@ a{color:#22d3ee;text-decoration:none}
     const zipUrl = link(req, "/ui/evidence.zip", auth.tenantId, auth.k);
 
     res.setHeader("content-type","text/html; charset=utf-8");
-    res.end(`<!doctype html>
+    res.end(html`<!doctype html>
 <html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Pilot — Intake Guardian</title>
 <style>
@@ -91,19 +90,19 @@ code{font-family:ui-monospace,Menlo,Monaco,Consolas,monospace;font-size:12px}
     </div>
 
     <div class="row">
-      <a class="btn" href="${htmlEscape(ticketsUrl)}">Open Tickets</a>
-      <a class="btn" href="${htmlEscape(csvUrl)}">Download CSV</a>
-      <a class="btn" href="${htmlEscape(zipUrl)}">Download Evidence ZIP</a>
+      <a class="btn" href="${sanitizeUrl(ticketsUrl)}">Open Tickets</a>
+      <a class="btn" href="${sanitizeUrl(csvUrl)}">Download CSV</a>
+      <a class="btn" href="${sanitizeUrl(zipUrl)}">Download Evidence ZIP</a>
       <form method="post" action="/api/ui/send-test-lead?tenantId=${encodeURIComponent(auth.tenantId)}&k=${encodeURIComponent(auth.k)}" style="margin:0">
         <button class="btn" type="submit">Send Test Lead</button>
       </form>
     </div>
 
     <div class="m" style="margin-top:14px">Webhook URL (paste into Zapier/Make/n8n as the target URL):</div>
-    <pre><code>${htmlEscape(webhookUrl)}</code></pre>
+    <pre><code>${webhookUrl}</code></pre>
 
     <div class="m">Token (paste into “Header value” / “Secret token” field):</div>
-    <pre><code>${htmlEscape(auth.k)}</code></pre>
+    <pre><code>${auth.k}</code></pre>
 
     <div class="small">We do not show “headers” to end clients; platform puts the header automatically.</div>
   </div>
@@ -122,7 +121,7 @@ code{font-family:ui-monospace,Menlo,Monaco,Consolas,monospace;font-size:12px}
     const pilotUrl = link(req, "/ui/pilot", auth.tenantId, auth.k);
 
     const table = rows.length
-      ? `<table style="width:100%;border-collapse:collapse;margin-top:12px">
+      ? html`<table style="width:100%;border-collapse:collapse;margin-top:12px">
           <thead>
             <tr style="text-align:left;color:#9ca3af;font-size:12px">
               <th style="padding:8px;border-bottom:1px solid rgba(255,255,255,.10)">id</th>
@@ -132,20 +131,20 @@ code{font-family:ui-monospace,Menlo,Monaco,Consolas,monospace;font-size:12px}
             </tr>
           </thead>
           <tbody>
-            ${rows.map(t => `
+            ${rows.map(t => html`
               <tr>
-                <td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.06)"><code>${htmlEscape(t.id)}</code></td>
-                <td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.06)">${htmlEscape(t.status)}</td>
-                <td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.06)">${htmlEscape(t.title)}</td>
-                <td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.06);color:#9ca3af">${htmlEscape(t.createdAtUtc)}</td>
+                <td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.06)"><code>${t.id}</code></td>
+                <td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.06)">${t.status}</td>
+                <td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.06)">${t.title}</td>
+                <td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.06);color:#9ca3af">${t.createdAtUtc}</td>
               </tr>
-            `).join("")}
+            `)}
           </tbody>
         </table>`
-      : `<div style="margin-top:14px;color:#9ca3af">No tickets yet.</div>`;
+      : html`<div style="margin-top:14px;color:#9ca3af">No tickets yet.</div>`;
 
     res.setHeader("content-type","text/html; charset=utf-8");
-    res.end(`<!doctype html>
+    res.end(html`<!doctype html>
 <html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Tickets — Intake Guardian</title>
 <style>
@@ -165,9 +164,9 @@ code{font-family:ui-monospace,Menlo,Monaco,Consolas,monospace;font-size:12px}
   <div class="card">
     <div class="h">Tickets</div>
     <div class="row">
-      <a class="btn" href="${htmlEscape(pilotUrl)}">Back to Pilot</a>
-      <a class="btn" href="${htmlEscape(csvUrl)}">Download CSV</a>
-      <a class="btn" href="${htmlEscape(zipUrl)}">Download Evidence ZIP</a>
+      <a class="btn" href="${sanitizeUrl(pilotUrl)}">Back to Pilot</a>
+      <a class="btn" href="${sanitizeUrl(csvUrl)}">Download CSV</a>
+      <a class="btn" href="${sanitizeUrl(zipUrl)}">Download Evidence ZIP</a>
     </div>
     ${table}
   </div>

@@ -33,6 +33,7 @@
     "data",
     "dist/**",
     "__bak_phase30b_*",
-    "__bak_phase30c_*"
+    "__bak_phase30c_*",
+    "scripts"
   ]
 }
