@@ -37,11 +37,11 @@ function toCsv(rows: any[]): string {
  *  - hashes.json
  *  - README.md
  */
-export function writeEvidencePack(packDir: string, tenantId: string) {
+export async function writeEvidencePack(packDir: string, tenantId: string) {
   const evidenceDir = path.join(packDir, "evidence");
   ensureDir(evidenceDir);
 
-  const tickets = listTickets(tenantId);
+  const tickets = await listTickets(tenantId);
   const evHash = computeEvidenceHash(tenantId);
 
   // attach evidence hash to each row for export convenience
