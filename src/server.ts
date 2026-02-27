@@ -19,12 +19,23 @@ function tenantsFile() {
   return path.resolve(DATA_DIR, "tenants.json");
 }
 
+let _tenantsCache: Tenant[] | null = null;
+let _tenantsMtime = 0;
+
 function loadTenants(): Tenant[] {
   const fp = tenantsFile();
-  if (!fs.existsSync(fp)) return [];
   try {
+    const stats = fs.statSync(fp);
+    if (_tenantsCache && stats.mtimeMs === _tenantsMtime) {
+      return _tenantsCache;
+    }
+
     const j = JSON.parse(fs.readFileSync(fp, "utf8"));
-    return Array.isArray(j?.tenants) ? (j.tenants as Tenant[]) : (Array.isArray(j) ? (j as Tenant[]) : []);
+    const rows = Array.isArray(j?.tenants) ? (j.tenants as Tenant[]) : (Array.isArray(j) ? (j as Tenant[]) : []);
+
+    _tenantsCache = rows;
+    _tenantsMtime = stats.mtimeMs;
+    return rows;
   } catch {
     return [];
   }
