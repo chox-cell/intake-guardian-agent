@@ -11,7 +11,7 @@ type AuthOpts = {
 };
 
 type AuthTokenRecord = {
-  token: string;
+  tokenHash: string; // CHANGED: store hash instead of plain token
   email: string;
   createdAtUtc: string;
   expiresAtUtc: string;
@@ -50,6 +50,10 @@ function randToken(len = 32) {
 function randKey(len = 32) {
   // tenant key must be stable and url-safe
   return crypto.randomBytes(len).toString("base64url").slice(0, len);
+}
+
+function hashToken(token: string) {
+  return crypto.createHash("sha256").update(token).digest("hex");
 }
 
 function constantTimeEq(a: string, b: string) {
@@ -128,12 +132,13 @@ export function authRouter(opts?: AuthOpts) {
 
     const ttlMin = Number(process.env.AUTH_TOKEN_TTL_MINUTES || 30);
     const token = randToken(24);
+    const tokenHash = hashToken(token);
     const createdAtUtc = nowIso();
     const expiresAtUtc = new Date(Date.now() + ttlMin * 60_000).toISOString();
 
     const all = readJson<AuthTokenRecord[]>(tokensJson, []);
     all.unshift({
-      token,
+      tokenHash,
       email,
       createdAtUtc,
       expiresAtUtc,
@@ -171,7 +176,10 @@ This link expires in ${ttlMin} minutes.
     if (!token) return res.status(400).send("missing_token");
 
     const all = readJson<AuthTokenRecord[]>(tokensJson, []);
-    const rec = all.find(x => x && x.token && constantTimeEq(x.token, token));
+    const h = hashToken(token);
+
+    // Compare hashes
+    const rec = all.find(x => x && x.tokenHash && constantTimeEq(x.tokenHash, h));
     if (!rec) return res.status(400).send("invalid_token");
 
     const now = Date.now();
