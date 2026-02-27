@@ -1,0 +1,44 @@
+{
+  "product": "Intake-Guardian Agent",
+  "positioning": "Turn Email & WhatsApp IT requests into structured tickets with SLA + dedupe + security.",
+  "plans": [
+    {
+      "id": "starter",
+      "label": "Starter",
+      "price_eur_month": 29,
+      "includes": [
+        "1 tenant",
+        "Email inbound (SendGrid-style form) + Webhook intake",
+        "Ticket creation + SLA + priority",
+        "Dedupe (24h window)",
+        "Tenant keys security",
+        "Rate limiting"
+      ],
+      "limits": { "tickets_per_month": 500 }
+    },
+    {
+      "id": "pro",
+      "label": "Pro",
+      "price_eur_month": 79,
+      "includes": [
+        "Up to 5 tenants",
+        "Email + WhatsApp inbound",
+        "Outbound Slack notify endpoint (optional)",
+        "Admin stats endpoint (proof)",
+        "Priority rules tuning"
+      ],
+      "limits": { "tickets_per_month": 3000 }
+    },
+    {
+      "id": "on_prem",
+      "label": "On-Prem",
+      "price": "Custom",
+      "includes": [
+        "Self-hosted deployment",
+        "Data stays inside company",
+        "Custom integrations",
+        "Support & hardening"
+      ]
+    }
+  ]
+}

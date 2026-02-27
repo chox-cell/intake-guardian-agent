@@ -1,0 +1,28 @@
+# local junk
+.phase*
+.tmp_backups/
+__bak_*/
+shot*.sh
+shit.sh
+take*.sh
+ui.sh
+oneshot*.sh
+phase.sh
+resend.sh
+
+# backups
+.bak/
+*.bak
+*.swp
+
+# generated governance artifacts
+governance/manifest.json
+governance/master.hash
+governance/reports/*.pdf
+
+# data
+data/
+exports/
+dist/
+build/
+coverage/

@@ -1,0 +1,59 @@
+import crypto from "crypto";
+
+type TenantRec = {
+  tenantId: string;
+  tenantKey: string;
+  createdAt: string;
+  rotatedAt?: string;
+};
+
+export class TenantsStore {
+  private tenants = new Map<string, TenantRec>();
+
+  constructor(seedJson?: string) {
+    const raw = (seedJson || "").trim();
+    if (!raw) return;
+    try {
+      const obj = JSON.parse(raw);
+      for (const [tenantId, tenantKey] of Object.entries(obj)) {
+        if (typeof tenantId === "string" && typeof tenantKey === "string") {
+          this.tenants.set(tenantId, {
+            tenantId,
+            tenantKey,
+            createdAt: new Date().toISOString()
+          });
+        }
+      }
+    } catch {
+      // ignore invalid seed
+    }
+  }
+
+  list() {
+    return Array.from(this.tenants.values());
+  }
+
+  verify(tenantId: string, key: string) {
+    const rec = this.tenants.get(tenantId);
+    if (!rec) return false;
+    return rec.tenantKey === key;
+  }
+
+  upsertNew(tenantId?: string) {
+    const id = tenantId || `tenant_${Date.now()}`;
+    const key = crypto.randomBytes(24).toString("base64url");
+    const rec: TenantRec = { tenantId: id, tenantKey: key, createdAt: new Date().toISOString() };
+    this.tenants.set(id, rec);
+    return { tenantId: rec.tenantId, tenantKey: rec.tenantKey };
+  }
+
+  rotate(tenantId: string) {
+    const rec = this.tenants.get(tenantId);
+    if (!rec) return null;
+    const key = crypto.randomBytes(24).toString("base64url");
+    rec.tenantKey = key;
+    rec.rotatedAt = new Date().toISOString();
+    this.tenants.set(tenantId, rec);
+    return { tenantId: rec.tenantId, tenantKey: rec.tenantKey };
+  }
+}

@@ -41,7 +41,7 @@ this.map = new Map(norm.map((t: any) => [t.tenantId, t]));
 
   list(): TenantRecord[] {
     return Array.from(this.map.values()).sort((a, b) =>
-      a.createdAt.localeCompare(b.createdAt)
+      String(a.createdAt ?? "").localeCompare(String(b.createdAt ?? ""))
     );
   }
 

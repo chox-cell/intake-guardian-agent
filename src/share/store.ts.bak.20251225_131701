@@ -1,0 +1,30 @@
+import crypto from "crypto";
+
+export type ShareToken = {
+  token: string;
+  tenantId: string;
+  createdAt: string;
+  expiresAt: number;
+};
+
+export class ShareStore {
+  private items = new Map<string, ShareToken>();
+
+  create(tenantId: string, ttlSeconds = 7 * 86400) {
+    const token = crypto.randomBytes(18).toString("base64url");
+    const expiresAt = Date.now() + ttlSeconds * 1000;
+    const createdAt = new Date().toISOString();
+    this.items.set(token, { token, tenantId, createdAt, expiresAt });
+    return token;
+  }
+
+  verify(token: string) {
+    const it = this.items.get(token);
+    if (!it) return null;
+    if (Date.now() > it.expiresAt) {
+      this.items.delete(token);
+      return null;
+    }
+    return it;
+  }
+}

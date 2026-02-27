@@ -1,0 +1,110 @@
+import fs from "node:fs";
+import path from "node:path";
+
+import dotenv from "dotenv";
+dotenv.config({ path: path.resolve(process.cwd(), ".env.local") });
+dotenv.config({ path: path.resolve(process.cwd(), ".env") });
+
+import express from "express";
+import pino from "pino";
+
+import { captureRawBody } from "./api/raw-body.js";
+import { makeRoutes } from "./api/routes.js";
+import { makeAdapterRoutes } from "./api/adapters.js";
+import { makeOutboundRoutes } from "./api/outbound.js";
+import { makeUiRoutes } from "./api/ui.js";
+
+import { FileStore } from "./store/file.js";
+import { TenantsStore } from "./tenants/store.js";
+import { ShareStore } from "./shares/store.js";
+import { ResendMailer } from "./lib/resend.js";
+
+const log = pino({ level: process.env.LOG_LEVEL || "info" });
+
+const PORT = Number(process.env.PORT || 7090);
+const DATA_DIR = process.env.DATA_DIR || "./data";
+const PRESET_ID = process.env.PRESET_ID || "it_support.v1";
+const DEDUPE_WINDOW_SECONDS = Number(process.env.DEDUPE_WINDOW_SECONDS || 86400);
+const WA_VERIFY_TOKEN = (process.env.WA_VERIFY_TOKEN || "").trim();
+
+const ADMIN_KEY = (process.env.ADMIN_KEY || "").trim();
+const TENANT_KEYS_JSON = process.env.TENANT_KEYS_JSON || "";
+
+const RESEND_API_KEY = (process.env.RESEND_API_KEY || "").trim();
+const RESEND_FROM = (process.env.RESEND_FROM || "").trim();
+const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || `http://127.0.0.1:${PORT}`).trim();
+const RESEND_DRY_RUN = (process.env.RESEND_DRY_RUN || "").trim() === "1";
+
+fs.mkdirSync(DATA_DIR, { recursive: true });
+
+const store = new FileStore(path.resolve(DATA_DIR));
+const tenants = new TenantsStore(DATA_DIR, TENANT_KEYS_JSON);
+const shares = new ShareStore(DATA_DIR);
+
+const mailer = (RESEND_API_KEY && RESEND_FROM)
+  ? new ResendMailer({ apiKey: RESEND_API_KEY, from: RESEND_FROM, publicBaseUrl: PUBLIC_BASE_URL, dryRun: RESEND_DRY_RUN })
+  : undefined;
+
+async function main() {
+  await store.init();
+
+  const app = express();
+
+  app.use(express.json({ limit: "512kb", verify: captureRawBody as any }));
+  app.use(express.urlencoded({ extended: true, limit: "512kb", verify: captureRawBody as any }));
+
+  // Simple health alias (some scripts use /health)
+  app.get("/health", (_req, res) => res.json({ ok: true }));
+
+  // Core API
+  app.use("/api", makeRoutes({ store, presetId: PRESET_ID, dedupeWindowSeconds: DEDUPE_WINDOW_SECONDS, tenants, shares }));
+
+  // Inbound adapters (Email / WhatsApp)
+  app.use(
+    "/api/adapters",
+    makeAdapterRoutes({
+      store,
+      presetId: PRESET_ID,
+      dedupeWindowSeconds: DEDUPE_WINDOW_SECONDS,
+      waVerifyToken: WA_VERIFY_TOKEN || undefined,
+      tenants,
+      shares,
+      mailer,
+      publicBaseUrl: PUBLIC_BASE_URL
+    })
+  );
+
+  // Outbound/admin routes
+  app.use("/api", (req, res, next) => {
+    // protect /api/admin/* with x-admin-key if configured
+    if (req.path.startsWith("/admin/") && ADMIN_KEY) {
+      const k = (req.header("x-admin-key") || "").trim();
+      if (k !== ADMIN_KEY) return res.status(401).json({ ok: false, error: "invalid_admin_key" });
+    }
+    next();
+  });
+  app.use("/api", makeOutboundRoutes({ store, tenants }));
+
+  // UI
+  app.use("/ui", makeUiRoutes({ store, tenants, shares }));
+
+  app.listen(PORT, () => {
+    log.info(
+      {
+        PORT,
+        DATA_DIR,
+        PRESET_ID,
+        DEDUPE_WINDOW_SECONDS,
+        TENANT_KEYS_CONFIGURED: Boolean(TENANT_KEYS_JSON.trim()),
+        ADMIN_KEY_CONFIGURED: Boolean(ADMIN_KEY),
+        RESEND_CONFIGURED: Boolean(mailer),
+      },
+      "Intake-Guardian Agent running"
+    );
+  });
+}
+
+main().catch((err) => {
+  log.error({ err }, "fatal");
+  process.exit(1);
+});

@@ -1,0 +1,310 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="${ROOT:-$HOME/Projects/intake-guardian-agent}"
+cd "$ROOT"
+
+echo "==> OneShot: Resend receipts + share link @ $ROOT"
+
+ts="$(date +%Y%m%d_%H%M%S)"
+BK="__bak_resend_${ts}"
+mkdir -p "$BK"
+
+backup() { [ -f "$1" ] && mkdir -p "$BK/$(dirname "$1")" && cp -v "$1" "$BK/$1" >/dev/null || true; }
+
+echo "==> [0] Backups"
+backup tsconfig.json
+backup src/server.ts
+backup src/api/ui.ts
+backup src/api/adapters.ts
+
+mkdir -p src/lib src/share
+
+echo "==> [1] Ensure tsconfig excludes backups"
+node - <<'NODE'
+const fs = require("fs");
+const p = "tsconfig.json";
+if (!fs.existsSync(p)) process.exit(0);
+const j = JSON.parse(fs.readFileSync(p,"utf8"));
+j.exclude = Array.from(new Set([...(j.exclude||[]), "node_modules", "dist", "build", "__bak_*", "__bak_resend_*", "**/*.bak.*", ".bak"]));
+fs.writeFileSync(p, JSON.stringify(j,null,2)+"\n");
+console.log("✅ Patched", p);
+NODE
+
+echo "==> [2] ShareStore (server-scoped)"
+cat > src/share/store.ts <<'TS'
+import crypto from "crypto";
+
+export type ShareToken = {
+  token: string;
+  tenantId: string;
+  createdAt: string;
+  expiresAt: number;
+};
+
+export class ShareStore {
+  private items = new Map<string, ShareToken>();
+
+  create(tenantId: string, ttlSeconds = 7 * 86400) {
+    const token = crypto.randomBytes(18).toString("base64url");
+    const expiresAt = Date.now() + ttlSeconds * 1000;
+    const createdAt = new Date().toISOString();
+    this.items.set(token, { token, tenantId, createdAt, expiresAt });
+    return token;
+  }
+
+  verify(token: string) {
+    const it = this.items.get(token);
+    if (!it) return null;
+    if (Date.now() > it.expiresAt) {
+      this.items.delete(token);
+      return null;
+    }
+    return it;
+  }
+}
+TS
+
+echo "==> [3] Resend mailer"
+cat > src/lib/resend.ts <<'TS'
+type ReceiptArgs = {
+  to: string;
+  subject: string;
+  ticketId: string;
+  tenantId: string;
+  dueAtISO: string;
+  slaSeconds: number;
+  priority: string;
+  shareUrl: string;
+};
+
+export class ResendMailer {
+  private apiKey: string;
+  private from: string;
+  private baseUrl: string;
+  private dryRun: boolean;
+
+  constructor(args: { apiKey: string; from: string; publicBaseUrl: string; dryRun?: boolean }) {
+    this.apiKey = args.apiKey;
+    this.from = args.from;
+    this.baseUrl = args.publicBaseUrl.replace(/\/+$/,"");
+    this.dryRun = Boolean(args.dryRun);
+  }
+
+  async sendReceipt(a: ReceiptArgs) {
+    const html = this.render(a);
+    const payload = {
+      from: this.from,
+      to: a.to,
+      subject: a.subject,
+      html
+    };
+
+    if (this.dryRun) {
+      // safe: no outbound
+      return { ok: true, dryRun: true, payload: { ...payload, html: "[omitted]" } };
+    }
+
+    const r = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${this.apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const text = await r.text().catch(()=> "");
+    if (!r.ok) return { ok: false, status: r.status, body: text.slice(0, 500) };
+    return { ok: true, body: text.slice(0, 500) };
+  }
+
+  private render(a: ReceiptArgs) {
+    const due = new Date(a.dueAtISO).toLocaleString();
+    const slaH = Math.round(a.slaSeconds / 3600);
+    return `
+<div style="font-family:system-ui,Segoe UI,Roboto,Arial;line-height:1.5;background:#0b0b0d;color:#eaeaf0;padding:24px">
+  <div style="max-width:680px;margin:0 auto;background:#111;border:1px solid #222;border-radius:14px;padding:18px">
+    <h2 style="margin:0 0 10px 0">✅ Ticket created</h2>
+    <p style="margin:0 0 14px 0;opacity:.85">Your request was converted into a trackable ticket.</p>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0">
+      <div style="background:#0d0d10;border:1px solid #222;border-radius:12px;padding:12px">
+        <div style="opacity:.65;font-size:12px">Ticket ID</div>
+        <div style="font-weight:700">${a.ticketId}</div>
+      </div>
+      <div style="background:#0d0d10;border:1px solid #222;border-radius:12px;padding:12px">
+        <div style="opacity:.65;font-size:12px">Priority</div>
+        <div style="font-weight:700">${a.priority}</div>
+      </div>
+      <div style="background:#0d0d10;border:1px solid #222;border-radius:12px;padding:12px">
+        <div style="opacity:.65;font-size:12px">SLA</div>
+        <div style="font-weight:700">${slaH}h</div>
+      </div>
+      <div style="background:#0d0d10;border:1px solid #222;border-radius:12px;padding:12px">
+        <div style="opacity:.65;font-size:12px">Due</div>
+        <div style="font-weight:700">${due}</div>
+      </div>
+    </div>
+
+    <a href="${a.shareUrl}" style="display:inline-block;background:#1f7;color:#000;text-decoration:none;padding:10px 14px;border-radius:12px;font-weight:700">
+      Open tickets (read-only)
+    </a>
+
+    <p style="margin-top:14px;opacity:.55;font-size:12px">
+      Tenant: ${a.tenantId} • Generated by Intake-Guardian
+    </p>
+  </div>
+</div>`;
+  }
+}
+TS
+
+echo "==> [4] Patch UI: ensure /ui/share/:token uses server ShareStore"
+# We patch src/api/ui.ts to accept args.shares.verify() if present
+node - <<'NODE'
+const fs = require("fs");
+const p = "src/api/ui.ts";
+if (!fs.existsSync(p)) {
+  console.error("❌ src/api/ui.ts not found. Stop.");
+  process.exit(1);
+}
+let s = fs.readFileSync(p,"utf8");
+
+// 1) ensure imports include ShareStore type usage not required; just rely on args.shares
+// 2) replace any local new ShareStore() usage to args.shares
+
+s = s.replace(/const\s+shares\s*=\s*new\s+ShareStore\(\)\s*;?/g, "// shares provided by server scope via args.shares");
+
+// create/verify calls
+s = s.replace(/shares\.create\(/g, "args.shares.create(");
+s = s.replace(/shares\.verify\(/g, "args.shares.verify(");
+
+// If route /ui/share exists but uses shares.verify, ok.
+// If not found, we don't force.
+
+fs.writeFileSync(p, s);
+console.log("✅ Patched", p);
+NODE
+
+echo "==> [5] Patch adapters: after email ingest => send Resend receipt + share link (non-blocking)"
+node - <<'NODE'
+const fs = require("fs");
+const p = "src/api/adapters.ts";
+if (!fs.existsSync(p)) {
+  console.error("❌ src/api/adapters.ts not found. Stop.");
+  process.exit(1);
+}
+let s = fs.readFileSync(p,"utf8");
+
+// Ensure args includes mailer + shares (additive)
+if (!s.includes("mailer?:")) {
+  s = s.replace(
+    /export function makeAdapterRoutes\(\s*args:\s*\{([\s\S]*?)\}\s*\)/,
+    (m, inner) => {
+      if (inner.includes("mailer?:") || inner.includes("shares?:")) return m;
+      // insert near tenants/store
+      return m.replace("{"+inner+"}", "{"+inner+"\n  mailer?: any;\n  shares?: any;\n}");
+    }
+  );
+}
+
+// After a workItem is created in email sendgrid handler, send receipt.
+// We patch by looking for `return res.json({ ok: true` within email route and inject before it.
+const marker = "return res.json({ ok: true";
+if (s.includes(marker) && !s.includes("sendReceipt(")) {
+  s = s.replace(marker, `
+    // Non-blocking receipt email (Resend)
+    try {
+      if (args.mailer && args.shares && workItem?.sender) {
+        const token = args.shares.create(tenantId);
+        const base = (process.env.PUBLIC_BASE_URL || "http://127.0.0.1:7090").replace(/\\/+$/,"");
+        const shareUrl = base + "/ui/share/" + token;
+
+        args.mailer.sendReceipt({
+          to: workItem.sender,
+          subject: "Ticket created: " + (workItem.subject || workItem.id),
+          ticketId: workItem.id,
+          tenantId,
+          dueAtISO: workItem.dueAt,
+          slaSeconds: workItem.slaSeconds,
+          priority: workItem.priority,
+          shareUrl
+        }).catch(()=>{});
+      }
+    } catch (e) {}
+
+${marker}`);
+}
+
+fs.writeFileSync(p, s);
+console.log("✅ Patched", p);
+NODE
+
+echo "==> [6] Patch server.ts: create shares + mailer + pass into makeUiRoutes/makeAdapterRoutes"
+node - <<'NODE'
+const fs = require("fs");
+const p = "src/server.ts";
+if (!fs.existsSync(p)) {
+  console.error("❌ src/server.ts not found. Stop.");
+  process.exit(1);
+}
+let s = fs.readFileSync(p,"utf8");
+
+// Ensure imports
+if (!s.includes('from "./share/store.js"') && !s.includes("from './share/store.js'")) {
+  s = s.replace(/from "\.\/api\/ui\.js";\n/, (m)=> m + `import { ShareStore } from "./share/store.js";\n`);
+}
+if (!s.includes('from "./lib/resend.js"') && !s.includes("from './lib/resend.js'")) {
+  s = s.replace(/from "\.\/share\/store\.js";\n/, (m)=> m + `import { ResendMailer } from "./lib/resend.js";\n`);
+}
+
+// Ensure env reads
+if (!s.includes("RESEND_API_KEY")) {
+  s = s.replace(/const\s+PORT\s*=.*\n/, (m)=> m + `const RESEND_API_KEY = (process.env.RESEND_API_KEY || "").trim();\nconst RESEND_FROM = (process.env.RESEND_FROM || "").trim();\nconst PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || "http://127.0.0.1:7090").trim();\nconst RESEND_DRY_RUN = (process.env.RESEND_DRY_RUN || "0").trim() === "1";\n`);
+}
+
+// Ensure shares + mailer instance (server scope)
+if (!s.includes("const shares = new ShareStore")) {
+  // place after tenants/store exist: we try near store init
+  s = s.replace(/const\s+store\s*=([\s\S]*?);\n/, (m)=> m + `\nconst shares = new ShareStore();\nconst mailer = (RESEND_API_KEY && RESEND_FROM)\n  ? new ResendMailer({ apiKey: RESEND_API_KEY, from: RESEND_FROM, publicBaseUrl: PUBLIC_BASE_URL, dryRun: RESEND_DRY_RUN })\n  : null;\n`);
+}
+
+// Patch makeUiRoutes mount to include shares
+s = s.replace(/makeUiRoutes\(\{\s*store\s*,\s*tenants\s*\}\)/g, "makeUiRoutes({ store, tenants, shares })");
+
+// Patch makeAdapterRoutes mount to include tenants + mailer + shares (keep existing keys)
+s = s.replace(/makeAdapterRoutes\(\{\s*store\s*,([\s\S]*?)\}\)/g, (m, inner)=>{
+  // if already has mailer/shares, keep
+  if (m.includes("shares") || m.includes("mailer")) return m;
+  return `makeAdapterRoutes({ store,${inner}\n      tenants,\n      shares,\n      mailer,\n    })`;
+});
+
+fs.writeFileSync(p, s);
+console.log("✅ Patched", p);
+NODE
+
+echo "==> [7] Typecheck"
+pnpm lint:types
+
+echo "==> [8] Git commit"
+git add tsconfig.json src/share/store.ts src/lib/resend.ts src/api/ui.ts src/api/adapters.ts src/server.ts
+git commit -m "feat(resend): email receipt + share link (read-only) after ticket ingest" || true
+
+echo
+echo "✅ Installed."
+echo
+echo "NEXT:"
+echo "  1) Add to .env.local (SAFE first):"
+echo "     RESEND_API_KEY=..."
+echo "     RESEND_FROM=it@yourdomain.com"
+echo "     PUBLIC_BASE_URL=http://127.0.0.1:7090"
+echo "     RESEND_DRY_RUN=1"
+echo
+echo "  2) Restart server:"
+echo "     pnpm dev"
+echo
+echo "  3) Test by ingest email ticket (sender will receive receipt when DRY_RUN=0):"
+echo "     curl -sS \"http://127.0.0.1:7090/api/adapters/email/sendgrid?tenantId=\$TENANT_ID\" \\"
+echo "       -H \"x-tenant-key: \$TENANT_KEY\" \\"
+echo "       -F 'from=test@corp.local' -F 'subject=Test' -F 'text=wifi down' | jq ."

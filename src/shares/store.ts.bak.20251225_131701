@@ -1,0 +1,22 @@
+import crypto from "crypto";
+
+type Share = {
+  token: string;
+  tenantId: string;
+  createdAt: string;
+};
+
+export class ShareStore {
+  private shares = new Map<string, Share>();
+
+  create(tenantId: string) {
+    const token = crypto.randomBytes(18).toString("base64url");
+    const s: Share = { token, tenantId, createdAt: new Date().toISOString() };
+    this.shares.set(token, s);
+    return s;
+  }
+
+  get(token: string) {
+    return this.shares.get(token) || null;
+  }
+}

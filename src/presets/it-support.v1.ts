@@ -1,4 +1,5 @@
 import { Priority } from "../types/contracts.js";
+import { decidePaidAdsV1 } from "../lib/rulesets/paid_ads_v1.js";
 
 export type ItCategory =
   | "auth_password"
@@ -37,7 +38,8 @@ export function classifyPriority(normalized: string, category: ItCategory): Prio
 
 export function slaForPriority(p: Priority): number {
   switch (p) {
-    case "critical": return 60 * 60;        // 1h
+    case "critical": return 60 * 60;
+    // case "paid_ads.v1": disabled (typing mismatch)
     case "high":     return 4 * 60 * 60;    // 4h
     case "normal":   return 24 * 60 * 60;   // 24h
     case "low":      return 72 * 60 * 60;   // 72h

@@ -1,0 +1,16 @@
+{
+  "source": "zapier",
+  "type": "lead",
+  "lead": {
+    "fullName": "Jane Doe",
+    "email": "jane@example.com",
+    "phone": "+33 6 00 00 00 00",
+    "company": "Example Co",
+    "notes": "Interested in SEO + Ads. Budget 1500€/mo."
+  },
+  "meta": {
+    "campaign": "Meta Lead Ads",
+    "form": "Lead Form A",
+    "ts": "2026-01-04T00:00:00Z"
+  }
+}

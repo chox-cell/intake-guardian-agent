@@ -1,0 +1,11 @@
+ZAPIER (30 sec)
+1) Trigger: Webhooks by Zapier → Catch Hook
+2) Action: Webhooks by Zapier → Custom Request
+   - POST
+   - URL: http://YOUR_HOST/api/webhook/intake?tenantId=TENANT_ID&k=TENANT_KEY
+   - Headers: Content-Type: application/json
+   - Data: copy assets/zapier/payload.example.json and map fields from trigger
+3) Test → open /ui/tickets?tenantId=TENANT_ID&k=TENANT_KEY
+4) Export proof:
+   - /ui/export.csv?tenantId=...&k=...
+   - /ui/evidence.zip?tenantId=...&k=...

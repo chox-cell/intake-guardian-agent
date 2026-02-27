@@ -1,0 +1,35 @@
+{
+  "name": "Decision Cover — Paid Ads Intake (Example)",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "decisioncover-paid-ads-intake",
+        "options": {}
+      },
+      "id": "Webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [420, 260]
+    },
+    {
+      "parameters": {
+        "url": "http://YOUR_BASE_URL/api/webhook/intake?tenantId=YOUR_TENANT_ID&k=YOUR_TENANT_KEY",
+        "method": "POST",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "{\n  \"source\": \"n8n\",\n  \"type\": \"lead\",\n  \"channel\": \"paid-ads\",\n  \"presetId\": \"paid_ads.v1\",\n  \"lead\": {\"fullName\": \"N8N Lead\", \"email\": \"lead@client.com\", \"company\": \"Client Co\"},\n  \"tracking\": {\"hasPixel\": false, \"hasConversionApi\": false, \"hasGtm\": true, \"hasUtm\": true, \"hasThankYouPage\": false}\n}"
+      },
+      "id": "HTTP Request",
+      "name": "HTTP Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [700, 260]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "HTTP Request", "type": "main", "index": 0 }]]
+    }
+  }
+}

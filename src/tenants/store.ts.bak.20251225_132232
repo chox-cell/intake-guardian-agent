@@ -1,0 +1,118 @@
+import fs from "node:fs";
+import path from "node:path";
+import crypto from "node:crypto";
+
+type TenantRec = { tenantId: string; keyHash: string; createdAt: string; rotatedAt?: string };
+
+function sha256(s: string) {
+  return crypto.createHash("sha256").update(s).digest("hex");
+}
+
+function nowISO() {
+  return new Date().toISOString();
+}
+
+function safeReadJson(p: string): any {
+  try {
+    if (!fs.existsSync(p)) return null;
+    return JSON.parse(fs.readFileSync(p, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function safeWriteJson(p: string, data: any) {
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, JSON.stringify(data, null, 2), "utf8");
+}
+
+function normalizeSeed(seed: unknown): Record<string, string> {
+  if (!seed) return {};
+  if (typeof seed === "string") {
+    const raw = seed.trim();
+    if (!raw) return {};
+    try {
+      const j = JSON.parse(raw);
+      if (j && typeof j === "object") return j as any;
+      return {};
+    } catch {
+      return {};
+    }
+  }
+  // if object already provided (was the crash cause)
+  if (typeof seed === "object") {
+    try {
+      return seed as any;
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+export class TenantsStore {
+  private filePath: string;
+  private tenants: Record<string, TenantRec>;
+
+  /**
+   * constructor(dataDir, seedJsonOrObject?)
+   * - seed can be JSON string or object { [tenantId]: tenantKey }
+   */
+  constructor(dataDir = "./data", seed?: unknown) {
+    this.filePath = path.join(dataDir, "tenants.json");
+    const j = safeReadJson(this.filePath);
+    this.tenants = (j && typeof j === "object" && j.tenants) ? j.tenants : {};
+
+    // Merge seed keys (dev friendly)
+    const seedMap = normalizeSeed(seed);
+    for (const [tenantId, tenantKey] of Object.entries(seedMap)) {
+      if (!tenantId || !tenantKey) continue;
+      if (!this.tenants[tenantId]) {
+        this.tenants[tenantId] = {
+          tenantId,
+          keyHash: sha256(String(tenantKey)),
+          createdAt: nowISO(),
+        };
+      } else {
+        // keep existing hash; seed shouldn't rotate silently
+      }
+    }
+    this.persist();
+  }
+
+  private persist() {
+    safeWriteJson(this.filePath, { tenants: this.tenants });
+  }
+
+  list() {
+    return Object.values(this.tenants).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  }
+
+  verify(tenantId: string, tenantKey: string): boolean {
+    const rec = this.tenants[tenantId];
+    if (!rec) return false;
+    return rec.keyHash === sha256(String(tenantKey));
+  }
+
+  upsertNew(tenantId?: string) {
+    const id = tenantId || `tenant_${Date.now()}`;
+    if (this.tenants[id]) {
+      return { tenantId: id, created: false, tenantKey: "" };
+    }
+    const key = crypto.randomBytes(24).toString("base64url");
+    this.tenants[id] = { tenantId: id, keyHash: sha256(key), createdAt: nowISO() };
+    this.persist();
+    return { tenantId: id, created: true, tenantKey: key };
+  }
+
+  rotate(tenantId: string) {
+    const rec = this.tenants[tenantId];
+    if (!rec) return { ok: false as const, error: "tenant_not_found" as const };
+    const key = crypto.randomBytes(24).toString("base64url");
+    rec.keyHash = sha256(key);
+    rec.rotatedAt = nowISO();
+    this.tenants[tenantId] = rec;
+    this.persist();
+    return { ok: true as const, tenantId, tenantKey: key };
+  }
+}

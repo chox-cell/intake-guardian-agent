@@ -1,27 +1,38 @@
-# deps
-node_modules/
-.pnpm-store/
+# --- runtime / local ---
+.env
+.env.local
+.env.*.local
 
-# build/runtime
+*.log
+*.pid
+.phase*.pid
+.phase*.json
+.phase*.log
+
+# --- node ---
+node_modules/
 dist/
 build/
 coverage/
-*.log
+tmp/
+.temp/
+.DS_Store
 
-# local env
-.env
-.env.*
-!.env.example
-
-# data generated
+# --- data ---
 data/
 exports/
-governance/reports/*.pdf
+
+# --- backups (local noise) ---
+*.swp
+*.bak
+.bak/
+.tmp_backups/
+__bak_*/
+
+# --- governance generated artifacts ---
 governance/manifest.json
 governance/master.hash
+governance/reports/*.pdf
 
-# backups
-.bak/
-*.bak
-*.swp
-.DS_Store
+# --- optional: keep backups inside repo but avoid git churn ---
+# archive/_local_backups/

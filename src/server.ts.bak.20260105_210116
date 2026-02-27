@@ -1,0 +1,181 @@
+import { mountStart } from "./ui/start_route.js";
+import express from "express";
+import { mountAdminApi } from "./api/admin.js";
+import path from "path";
+import pino from "pino";
+
+import { makeRoutes } from "./api/routes.js";
+import { makeAdapterRoutes } from "./api/adapters.js";
+import { TenantsStore } from "./tenants/store.js";
+import { mountUi } from "./ui/routes.js";
+import { mountSetup } from "./ui/setup_route.js";
+import { mountAdminTenantsApi } from "./api/admin-tenants.js";
+import { FileStore } from "./store/file.js";
+import { mountWebhook } from "./api/webhook.js";
+
+const logger = pino();
+
+const PORT = Number(process.env.PORT || 7090);
+const DATA_DIR = process.env.DATA_DIR || "./data";
+const PRESET_ID = process.env.PRESET_ID || "it_support.v1";
+const DEDUPE_WINDOW_SECONDS = Number(process.env.DEDUPE_WINDOW_SECONDS || 86400);
+
+async function main() {
+  const app = express();
+mountWebhook(app as any);
+  mountAdminApi(app as any);
+
+
+  // UI (Phase6)
+  app.use(express.urlencoded({ extended: true }));
+  app.use(express.json({ limit: "2mb" }));
+
+  const tenants = new TenantsStore({ dataDir: path.resolve(DATA_DIR) } as any);
+  const store = new FileStore(path.resolve(DATA_DIR));
+  (app as any).locals = (app as any).locals || {};
+  (app as any).locals.store = store as any;
+
+
+  // UI (sell UI + admin autolink lives in src/ui/routes.ts)
+
+  // API routes — IMPORTANT: pass only what your factory accepts; cast to any to avoid TS excess-props.
+  app.use("/api", makeRoutes({ store, presetId: PRESET_ID, dedupeWindowSeconds: DEDUPE_WINDOW_SECONDS } as any));
+
+  // UI (Phase13): local SSOT autolink + tickets
+  
+/**
+ * Phase30c: /ui/setup (Zapier instructions)
+ * - public instruction page (no secrets)
+ * - if tenantId + k present, shows direct links
+ */
+app.get("/ui/setup", (req, res) => {
+  const tenantId = String((req.query as any).tenantId || "");
+  const k = String((req.query as any).k || "");
+  const proto = String((req.headers["x-forwarded-proto"] as any) || ((req.socket as any).encrypted ? "https" : "http"));
+  const host = String((req.headers["x-forwarded-host"] as any) || req.headers.host || "localhost");
+  const baseUrl = `${proto}://${host}`;
+
+  const safe = (x: string) =>
+    (x || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+
+  const qs =
+    tenantId && k
+      ? `?tenantId=${encodeURIComponent(tenantId)}&k=${encodeURIComponent(k)}`
+      : "";
+
+  const intakePath = "" || "";
+  const defaultIntake = "";
+  const webhook = intakePath || "";
+
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Setup — Intake Guardian</title>
+<style>
+  :root{color-scheme:dark}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial;background:radial-gradient(1200px 800px at 30% 20%, #0b1633 0%, #05070c 65%);color:#e5e7eb}
+  .wrap{max-width:980px;margin:40px auto;padding:0 18px}
+  .card{border:1px solid rgba(255,255,255,.10);background:rgba(17,24,39,.55);border-radius:18px;padding:18px;box-shadow:0 18px 60px rgba(0,0,0,.35)}
+  .h{font-size:22px;font-weight:800;margin:0 0 6px}
+  .muted{color:#9ca3af;font-size:13px}
+  pre{white-space:pre-wrap;word-break:break-word;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.10);padding:12px;border-radius:12px}
+  a{color:#22d3ee;text-decoration:none}
+  .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+  .pill{border:1px solid rgba(255,255,255,.12);background:rgba(0,0,0,.20);border-radius:999px;padding:6px 10px;font-size:12px}
+  code{font-family:ui-monospace,Menlo,Monaco,Consolas,monospace;font-size:12px}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="h">Zapier Setup</div>
+      <div class="muted">Turn leads → deduped tickets → export CSV + evidence ZIP.</div>
+
+      <div class="row">
+        <div class="pill">baseUrl: <b>${safe(baseUrl)}</b></div>
+        <div class="pill">tenantId: <b>${safe(tenantId || "—")}</b></div>
+        <div class="pill">k: <b>${safe(k ? (k.slice(0,10)+"…") : "—")}</b></div>
+      </div>
+
+      <div class="muted" style="margin-top:14px">Admin autolink:</div>
+      <pre><code>${safe(baseUrl)}/ui/admin?adminKey=YOUR_ADMIN_KEY</code></pre>
+
+      <div class="muted" style="margin-top:12px">If you already have tenantId+k:</div>
+      <pre><code>Tickets:
+${safe(baseUrl)}/ui/tickets${qs}
+
+Export CSV:
+${safe(baseUrl)}/ui/export.csv${qs}
+
+Evidence ZIP:
+${safe(baseUrl)}/ui/evidence.zip${qs}</code></pre>
+
+      <div class="muted" style="margin-top:12px">Zapier Action (POST):</div>
+      <pre><code>URL: ${safe(baseUrl)}/api/webhook/intake
+Method: POST
+Headers:
+  Content-Type: application/json
+
+Body example:
+{
+  "source":"zapier",
+  "type":"lead",
+  "lead":{"fullName":"Jane Doe","email":"jane@example.com"}
+}</code></pre>
+
+      <div class="muted" style="margin-top:10px">
+        Docs folder: <code>docs/zapier</code>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
+
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  return res.status(200).send(html);
+});
+
+mountUi(app as any);
+  
+  mountSetup(app);
+  mountStart(app);
+  // Phase31: client setup page (Zapier)
+  mountSetup(app as any);
+app.use("/api/adapters", makeAdapterRoutes({ store, presetId: PRESET_ID, dedupeWindowSeconds: DEDUPE_WINDOW_SECONDS, tenants } as any));
+
+  app.get("/health", (_req, res) => res.json({ ok: true }));
+
+  
+  // UI (Phase6e) — mount after store+tenants exist
+
+
+  // UI (Phase6f) — mount after store+tenants exist
+  
+
+  // Admin tenants API (real)
+  mountAdminTenantsApi(app as any, { dataDir: path.resolve(DATA_DIR) });
+app.listen(PORT, () => {
+    logger.info(
+      {
+        PORT,
+        DATA_DIR,
+        PRESET_ID,
+        DEDUPE_WINDOW_SECONDS,
+        TENANT_KEYS_CONFIGURED: true,
+        ADMIN_KEY_CONFIGURED: !!process.env.ADMIN_KEY
+      },
+      "Intake-Guardian Agent running"
+    );
+  });
+}
+
+main().catch((err) => {
+  logger.error({ err }, "fatal");
+  process.exit(1);
+});
