@@ -112,9 +112,9 @@ code{font-family:ui-monospace,Menlo,Monaco,Consolas,monospace;font-size:12px}
   });
 
   // Tickets (auth)
-  app.get("/ui/tickets", uiAuth, (req: Request, res: Response) => {
+  app.get("/ui/tickets", uiAuth, async (req: Request, res: Response) => {
     const auth = (req as any).auth as { tenantId: string; k: string };
-    const rows = listTickets(auth.tenantId);
+    const rows = await listTickets(auth.tenantId);
     const b = baseUrl(req);
 
     const csvUrl = link(req, "/ui/export.csv", auth.tenantId, auth.k);
@@ -176,9 +176,9 @@ code{font-family:ui-monospace,Menlo,Monaco,Consolas,monospace;font-size:12px}
   });
 
   // CSV (auth)
-  app.get("/ui/export.csv", uiAuth, (req: Request, res: Response) => {
+  app.get("/ui/export.csv", uiAuth, async (req: Request, res: Response) => {
     const auth = (req as any).auth as { tenantId: string; k: string };
-    const rows = listTickets(auth.tenantId);
+    const rows = await listTickets(auth.tenantId);
 
     res.setHeader("content-type", "text/csv; charset=utf-8");
     res.setHeader("content-disposition", `attachment; filename="tickets_${auth.tenantId}.csv"`);
@@ -188,7 +188,7 @@ code{font-family:ui-monospace,Menlo,Monaco,Consolas,monospace;font-size:12px}
   // Evidence ZIP (auth)
   app.get("/ui/evidence.zip", uiAuth, async (req: Request, res: Response) => {
     const auth = (req as any).auth as { tenantId: string; k: string };
-    const rows = listTickets(auth.tenantId);
+    const rows = await listTickets(auth.tenantId);
 
     const ticketsJson = JSON.stringify(rows, null, 2);
     const ticketsCsv = ticketsToCsv(rows);
@@ -221,14 +221,14 @@ code{font-family:ui-monospace,Menlo,Monaco,Consolas,monospace;font-size:12px}
   });
 
   // Optional: status change (auth) — simple enterprise control
-  app.post("/ui/tickets/status", uiAuth, (req: Request, res: Response) => {
+  app.post("/ui/tickets/status", uiAuth, async (req: Request, res: Response) => {
     const auth = (req as any).auth as { tenantId: string; k: string };
     const q = req.query as any;
     const id = String(q?.id || "").trim();
     const st = String(q?.st || "").trim() as any;
     if (!id) return res.status(400).send("missing id");
     if (!["open","pending","closed"].includes(st)) return res.status(400).send("invalid status");
-    const out = setTicketStatus(auth.tenantId, id, st);
+    const out = await setTicketStatus(auth.tenantId, id, st);
     if (!out.ok) return res.status(404).send("not found");
     return res.redirect(`/ui/tickets?tenantId=${encodeURIComponent(auth.tenantId)}&k=${encodeURIComponent(auth.k)}`);
   });

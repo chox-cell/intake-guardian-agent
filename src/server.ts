@@ -142,7 +142,7 @@ async function main() {
   });
 
   // webhook: easy (validates key, creates ticket)
-  app.post("/api/webhook/easy", (req, res) => {
+  app.post("/api/webhook/easy", async (req, res) => {
     const tenantId = String(req.query?.tenantId || "").trim();
     const tenantKey = String(req.header("x-tenant-key") || "").trim();
     if (!tenantId || !tenantKey) return res.status(401).json({ ok: false, error: "unauthorized", hint: "need tenantId + x-tenant-key" });
@@ -157,7 +157,7 @@ async function main() {
     const flags = missing.length ? ["missing_fields", "low_signal"] : [];
     const title = `Lead intake (${source})`;
 
-    const { ticket, created } = upsertTicket(tenantId, {
+    const { ticket, created } = await upsertTicket(tenantId, {
       source,
       type,
       title,
@@ -189,7 +189,7 @@ async function main() {
   });
 
   // UI helper: send test lead (uses easy webhook)
-  app.post("/api/ui/send-test-lead", (req, res) => {
+  app.post("/api/ui/send-test-lead", async (req, res) => {
     const tenantId = String(req.query?.tenantId || "").trim();
     const k = String(req.query?.k || "").trim();
     if (!tenantId || !k) return res.status(401).json({ ok: false, error: "unauthorized", hint: "need tenantId + k" });
@@ -207,7 +207,7 @@ async function main() {
     const flags = missing.length ? ["missing_fields", "low_signal"] : [];
     const title = `Lead intake (ui)`;
 
-    const { ticket, created } = upsertTicket(tenantId, {
+    const { ticket, created } = await upsertTicket(tenantId, {
       source: payload.source,
       type: payload.type,
       title,
