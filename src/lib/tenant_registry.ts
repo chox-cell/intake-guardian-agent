@@ -36,6 +36,11 @@ const LEGACY_FILES = [
   path.join("tenants", "tenants.json"),
 ];
 
+// Module-level cache for RegistryDoc
+// Key: dataDirAbs, Value: { doc: RegistryDoc, expires: number }
+const _cache: Record<string, { doc: RegistryDoc; expires: number }> = {};
+const CACHE_TTL_MS = 5000; // 5 seconds
+
 function nowUtc() {
   return new Date().toISOString();
 }
@@ -116,7 +121,11 @@ function constantTimeEq(a: string, b: string) {
   }
 }
 
-function loadRegistryDoc(dataDirAbs: string): RegistryDoc {
+/**
+ * Internal function to load registry doc from disk.
+ * Handles legacy merging and updates canonical file if needed.
+ */
+function loadRegistryDocInternal(dataDirAbs: string): RegistryDoc {
   ensureDir(dataDirAbs);
 
   const canonAbs = canonicalPath(dataDirAbs);
@@ -152,25 +161,40 @@ function loadRegistryDoc(dataDirAbs: string): RegistryDoc {
     .filter((t) => t.tenantId && t.tenantKey)
     .sort((a, b) => String(a.createdAtUtc || "").localeCompare(String(b.createdAtUtc || "")));
 
-  return {
+  const finalDoc: RegistryDoc = {
     version: 1,
     tenants,
     updatedAtUtc: nowUtc(),
   };
+
+  // Check if we need to write back to canonical
+  // We compare against the originally loaded canonical tenants
+  const prevSig = canonTenants.map((t) => `${t.tenantId}:${t.tenantKey}`).join("|");
+  const nextSig = tenants.map((t) => `${t.tenantId}:${t.tenantKey}`).join("|");
+
+  if (prevSig !== nextSig) {
+     fs.writeFileSync(canonAbs, JSON.stringify(finalDoc, null, 2) + "\n", "utf8");
+  }
+
+  return finalDoc;
 }
 
-function writeCanonicalIfChanged(dataDirAbs: string, doc: RegistryDoc) {
-  const canonAbs = canonicalPath(dataDirAbs);
-  const prev = safeReadJson(canonAbs);
-  const prevList = normalizeTenantsDoc(prev);
-  const nextList = doc.tenants;
+/**
+ * Loads the registry doc, utilizing a short-lived memory cache.
+ */
+function loadRegistryDoc(dataDirAbs: string): RegistryDoc {
+    const now = Date.now();
+    const cached = _cache[dataDirAbs];
+    if (cached && cached.expires > now) {
+        return cached.doc;
+    }
 
-  // cheap equality: count + ids+keys
-  const prevSig = prevList.map((t) => `${t.tenantId}:${t.tenantKey}`).join("|");
-  const nextSig = nextList.map((t) => `${t.tenantId}:${t.tenantKey}`).join("|");
-  if (prevSig === nextSig) return;
-
-  fs.writeFileSync(canonAbs, JSON.stringify(doc, null, 2) + "\n", "utf8");
+    const doc = loadRegistryDocInternal(dataDirAbs);
+    _cache[dataDirAbs] = {
+        doc,
+        expires: now + CACHE_TTL_MS
+    };
+    return doc;
 }
 
 function randKey32() {
@@ -181,20 +205,27 @@ function randKey32() {
 export function listTenants(dataDirAbs?: string): TenantRecord[] {
   const dir = path.resolve(dataDirAbs || process.env.DATA_DIR || "./data");
   const doc = loadRegistryDoc(dir);
-  writeCanonicalIfChanged(dir, doc);
   return doc.tenants;
 }
 
 export function getTenant(tenantId: string, dataDirAbs?: string): TenantRecord | null {
   const dir = path.resolve(dataDirAbs || process.env.DATA_DIR || "./data");
   const doc = loadRegistryDoc(dir);
-  writeCanonicalIfChanged(dir, doc);
   const t = doc.tenants.find((x) => x.tenantId === tenantId);
   return t || null;
 }
 
 export function upsertTenantRecord(rec: TenantRecord, dataDirAbs?: string) {
   const dir = path.resolve(dataDirAbs || process.env.DATA_DIR || "./data");
+  // Force load from disk to ensure we have latest before writing?
+  // Or trust cache + merge?
+  // Safety: load from cache is fine if we accept last-write-wins within 5s window,
+  // but better to load internal if we want strict consistency on write.
+  // However, for this task, let's use loadRegistryDoc (cached) then write.
+  // Actually, to update cache correctly, we should just modify the object we get
+  // (since it's a reference) and then write to disk.
+
+  // Let's get the doc (cached or fresh)
   const doc = loadRegistryDoc(dir);
 
   const clean: TenantRecord = {
@@ -218,7 +249,16 @@ export function upsertTenantRecord(rec: TenantRecord, dataDirAbs?: string) {
   }
 
   doc.updatedAtUtc = nowUtc();
-  writeCanonicalIfChanged(dir, doc);
+
+  // Write to disk
+  const canonAbs = canonicalPath(dir);
+  fs.writeFileSync(canonAbs, JSON.stringify(doc, null, 2) + "\n", "utf8");
+
+  // Update cache (renew TTL)
+  _cache[dir] = {
+      doc,
+      expires: Date.now() + CACHE_TTL_MS
+  };
 }
 
 export function createTenant(dataDirAbs?: string, notes?: string): TenantRecord {
