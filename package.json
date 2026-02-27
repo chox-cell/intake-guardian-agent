@@ -13,6 +13,7 @@
     "lint:types": "tsc -p tsconfig.json --noEmit",
     "smoke:day5": "bash scripts/smoke-day5.sh",
     "smoke:c": "bash scripts/smoke-c-ui.sh",
+    "test": "tsx --test src/**/*.test.ts",
     "integrity:generate": "tsx scripts/integrity-generate.ts",
     "integrity:verify": "tsx scripts/verify-integrity.ts",
     "report:module": "tsx scripts/generate-completion-report.ts"
