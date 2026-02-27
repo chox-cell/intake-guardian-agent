@@ -9,7 +9,12 @@ type Tenant = { tenantId: string; tenantKey: string; notes?: string; createdAtUt
 
 const PORT = Number(process.env.PORT || 7090);
 const DATA_DIR = process.env.DATA_DIR || "./data";
-const ADMIN_KEY = process.env.ADMIN_KEY || "dev_admin_key_123";
+const ADMIN_KEY = process.env.ADMIN_KEY;
+
+if (!ADMIN_KEY) {
+  console.error("FATAL: ADMIN_KEY environment variable is required.");
+  process.exit(1);
+}
 
 function ensureDir(p: string) {
   fs.mkdirSync(p, { recursive: true });
