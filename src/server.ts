@@ -19,12 +19,30 @@ function tenantsFile() {
   return path.resolve(DATA_DIR, "tenants.json");
 }
 
+let _tenantsCache: Tenant[] = [];
+let _tenantsMtime: number = 0;
+
 function loadTenants(): Tenant[] {
   const fp = tenantsFile();
-  if (!fs.existsSync(fp)) return [];
+  if (!fs.existsSync(fp)) {
+    _tenantsCache = [];
+    _tenantsMtime = 0;
+    return [];
+  }
   try {
+    const st = fs.statSync(fp);
+    // if mtime matches and cache is populated (or file was empty/validly empty on last read)
+    // we use a timestamp check primarily. To be safe, we check if _tenantsMtime is set > 0.
+    if (st.mtimeMs === _tenantsMtime && _tenantsMtime > 0) {
+      // return a shallow copy to prevent accidental mutation of the cache
+      return [..._tenantsCache];
+    }
+
     const j = JSON.parse(fs.readFileSync(fp, "utf8"));
-    return Array.isArray(j?.tenants) ? (j.tenants as Tenant[]) : (Array.isArray(j) ? (j as Tenant[]) : []);
+    const rows = Array.isArray(j?.tenants) ? (j.tenants as Tenant[]) : (Array.isArray(j) ? (j as Tenant[]) : []);
+    _tenantsCache = rows;
+    _tenantsMtime = st.mtimeMs;
+    return [...rows];
   } catch {
     return [];
   }
@@ -32,7 +50,15 @@ function loadTenants(): Tenant[] {
 
 function saveTenants(rows: Tenant[]) {
   ensureDir(path.dirname(tenantsFile()));
-  fs.writeFileSync(tenantsFile(), JSON.stringify({ ok: true, tenants: rows }, null, 2), "utf8");
+  const fp = tenantsFile();
+  fs.writeFileSync(fp, JSON.stringify({ ok: true, tenants: rows }, null, 2), "utf8");
+
+  // update cache immediately
+  try {
+    const st = fs.statSync(fp);
+    _tenantsCache = [...rows]; // update cache with fresh copy
+    _tenantsMtime = st.mtimeMs;
+  } catch {}
 }
 
 function mustAdmin(req: any, res: any): boolean {
