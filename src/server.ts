@@ -219,8 +219,7 @@ async function main() {
     const apiStatus = missing.length ? "needs_review" : "ready";
 
     // redirect back to tickets for zero-tech UX
-    const b = baseUrl(req);
-    res.setHeader("location", `${b}/ui/tickets?tenantId=${encodeURIComponent(tenantId)}&k=${encodeURIComponent(k)}`);
+    res.setHeader("location", `/ui/tickets?tenantId=${encodeURIComponent(tenantId)}&k=${encodeURIComponent(k)}`);
     return res.status(303).json({
       ok: true,
       created,
