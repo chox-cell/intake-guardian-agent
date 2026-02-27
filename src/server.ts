@@ -2,11 +2,13 @@ import express from "express";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import pino from "pino";
 import { mountUi } from "./ui/routes";
 import { upsertTicket } from "./lib/ticket-store";
 
 type Tenant = { tenantId: string; tenantKey: string; notes?: string; createdAtUtc: string; updatedAtUtc: string };
 
+const logger = pino({ level: process.env.LOG_LEVEL || "info" });
 const PORT = Number(process.env.PORT || 7090);
 const DATA_DIR = process.env.DATA_DIR || "./data";
 const ADMIN_KEY = process.env.ADMIN_KEY || "dev_admin_key_123";
@@ -247,11 +249,11 @@ async function main() {
   app.get("/", (_req, res) => res.redirect("/ui/welcome"));
 
   app.listen(PORT, () => {
-    console.log("Intake-Guardian running on", PORT);
+    logger.info({ port: PORT }, "Intake-Guardian running");
   });
 }
 
 main().catch((err) => {
-  console.error(err);
+  logger.fatal(err, "Startup failed");
   process.exit(1);
 });
