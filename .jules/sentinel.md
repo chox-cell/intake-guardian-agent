@@ -1,0 +1,4 @@
+## 2023-10-27 - [Host Header Injection via Unvalidated Request Headers]
+**Vulnerability:** Constructing the base URL using `X-Forwarded-Host` or `req.headers.host` directly without validation allows Host Header Injection. An attacker can manipulate `X-Forwarded-Host` to point to a malicious domain, causing internal links (like password reset or webhook setups) to point to the attacker's server, leaking sensitive tokens (like `tenantId` and `k` in this app).
+**Learning:** Never trust the `X-Forwarded-Host` or `X-Forwarded-Proto` headers, especially when generating URLs that contain sensitive tokens.
+**Prevention:** Always validate `X-Forwarded-Proto` to be strictly `http` or `https`, and `X-Forwarded-Host` against an allowlist or a strict alphanumeric regex (e.g., `/^[a-zA-Z0-9.-]+(:\d+)?$/`) before using them to construct absolute URLs. If validation fails, default to a safe value like `127.0.0.1` or the known app domain.

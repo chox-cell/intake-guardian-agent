@@ -54,8 +54,14 @@ function isValidTenantKey(tenantId: string, tenantKey: string): boolean {
 }
 
 function baseUrl(req: any) {
-  const proto = String(req.headers["x-forwarded-proto"] || (req.socket?.encrypted ? "https" : "http"));
-  const host = String(req.headers["x-forwarded-host"] || req.headers.host || "127.0.0.1");
+  // Security Enhancement: Validate proto to prevent injection
+  const rawProto = String(req.headers["x-forwarded-proto"] || (req.socket?.encrypted ? "https" : "http"));
+  const proto = rawProto === "https" ? "https" : "http";
+
+  // Security Enhancement: Validate host to prevent Host Header Injection
+  const rawHost = String(req.headers["x-forwarded-host"] || req.headers.host || "127.0.0.1");
+  const host = /^[a-zA-Z0-9.-]+(:\d+)?$/.test(rawHost) ? rawHost : "127.0.0.1";
+
   return `${proto}://${host}`;
 }
 
