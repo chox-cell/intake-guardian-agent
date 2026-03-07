@@ -95,10 +95,15 @@ function outboxWrite(dataDirAbs: string, subject: string, body: string) {
 
 function computeBaseUrl(req: any, explicit?: string) {
   if (explicit && String(explicit).trim()) return String(explicit).trim();
-  const proto =
+  const rawProto =
     String(req.headers?.["x-forwarded-proto"] || "") ||
     (req.socket?.encrypted ? "https" : "http");
-  const host = String(req.headers?.["x-forwarded-host"] || req.headers?.host || "localhost");
+  const proto = rawProto === "https" ? "https" : "http"; // Safe default to http
+
+  const rawHost = String(req.headers?.["x-forwarded-host"] || req.headers?.host || "localhost");
+  // Validate host header to prevent Host Header Injection
+  const host = /^[a-zA-Z0-9.-]+(:\d+)?$/.test(rawHost) ? rawHost : "localhost";
+
   return `${proto}://${host}`;
 }
 

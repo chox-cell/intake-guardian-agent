@@ -12,8 +12,13 @@ function htmlEscape(s: string) {
 }
 
 function baseUrl(req: Request) {
-  const proto = String((req.headers["x-forwarded-proto"] as any) || ((req.socket as any).encrypted ? "https" : "http"));
-  const host = String((req.headers["x-forwarded-host"] as any) || req.headers.host || "127.0.0.1");
+  const rawProto = String((req.headers["x-forwarded-proto"] as any) || ((req.socket as any).encrypted ? "https" : "http"));
+  const proto = rawProto === "https" ? "https" : "http"; // Safe default to http
+
+  const rawHost = String((req.headers["x-forwarded-host"] as any) || req.headers.host || "127.0.0.1");
+  // Validate host header to prevent Host Header Injection
+  const host = /^[a-zA-Z0-9.-]+(:\d+)?$/.test(rawHost) ? rawHost : "127.0.0.1";
+
   return `${proto}://${host}`;
 }
 
