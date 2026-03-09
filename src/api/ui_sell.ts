@@ -408,11 +408,16 @@ try {
       ["id","subject","from","status","priority","due"].join(","),
       ...(items || []).map((it: any) => {
         const id = (it.id || it.ticketId || it.workItemId || "");
-        const subject = (it.subject || it.title || "").replaceAll('"','""');
-        const from = (it.from || it.sender || "").replaceAll('"','""');
+        let subject = (it.subject || it.title || "").replaceAll('"','""');
+        let from = (it.from || it.sender || "").replaceAll('"','""');
         const status = (it.status || "new");
         const priority = (it.priority || "normal");
         const due = (it.dueAt || it.due || it.slaDue || it.sla || "");
+
+        // Prevent formula injection
+        if (/^[=+\-@]/.test(subject)) subject = "'" + subject;
+        if (/^[=+\-@]/.test(from)) from = "'" + from;
+
         return `"${id}","${subject}","${from}","${status}","${priority}","${due}"`;
       })
     ].join("\n");

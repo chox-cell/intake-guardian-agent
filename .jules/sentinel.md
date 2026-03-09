@@ -1,0 +1,4 @@
+## 2025-03-09 - [CSV Injection Prevention]
+**Vulnerability:** CSV injection (Formula Injection) was possible in multiple CSV export functionalities where user-supplied input (such as subject, from, title, etc.) starting with `=, +, -, @` could be executed as a formula if opened in Excel or similar applications.
+**Learning:** Sanitizing inputs for CSV export should include not just escaping commas and quotes, but also ensuring that fields starting with potentially dangerous formula prefixes (`=`, `+`, `-`, `@`) are prepended with a single quote (`'`) to treat the value as plain text in spreadsheet applications.
+**Prevention:** Always validate and sanitize user-provided values in CSV exports. Make sure functions that stringify data for CSV files check the starting characters of the field and prepend `'` if they begin with `=`, `+`, `-`, or `@`.
