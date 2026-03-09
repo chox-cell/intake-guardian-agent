@@ -28,7 +28,11 @@ function esc(s: any) {
 }
 
 function toCsvCell(v: any) {
-  const s = String(v ?? "");
+  let s = String(v ?? "");
+  // Prevent formula injection
+  if (/^[=+\-@]/.test(s)) {
+    s = "'" + s;
+  }
   const needs = /[,"\n]/.test(s);
   const out = s.replaceAll('"', '""');
   return needs ? `"${out}"` : out;
