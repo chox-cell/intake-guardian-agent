@@ -1,0 +1,4 @@
+## 2025-01-08 - [CRITICAL] Fix Authorization Bypass in Stateless UI Auth
+**Vulnerability:** The `uiAuth` middleware (`src/lib/ui-auth.ts`) extracted `tenantId` and `k` (tenantKey) from query parameters but failed to validate them against the tenant registry. This allowed any user to construct valid UI links (e.g. `?tenantId=dummy&k=dummy`) and access UI pages without authorization.
+**Learning:** Middleware extracting authentication tokens must explicitly validate them against a trusted backend store or registry. Simply checking for their presence is insufficient and creates a direct authorization bypass.
+**Prevention:** Always use a central verification function (like `verifyTenantKeyLocal`) to validate tokens in authentication/authorization middleware before allowing access to protected resources.
