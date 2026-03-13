@@ -1,0 +1,4 @@
+## 2025-01-20 - CSV Formula Injection
+**Vulnerability:** The application was vulnerable to CSV Formula Injection in `src/lib/ticket-store.ts`. When generating CSV exports with `ticketsToCsv`, fields from tickets were not properly sanitized if they began with `=`, `+`, `-`, or `@`.
+**Learning:** If a user provides input like `=CMD|' /C calc'!A0` in a ticket title or source, when an administrator downloads and opens the exported CSV file in Microsoft Excel or Google Sheets, the malicious payload could be executed (e.g., executing arbitrary commands or silently exfiltrating data to another source).
+**Prevention:** To prevent this, when building a CSV payload, any field that begins with one of the dangerous characters (`=`, `+`, `-`, `@`) should have a single quote (`'`) prepended to it. This forces the spreadsheet application to interpret the cell as text instead of evaluating it as a formula.

@@ -137,7 +137,13 @@ export function ticketsToCsv(rows: any[]): string {
   const header = ["id","status","source","type","title","createdAtUtc","evidenceHash"].join(",");
   const lines = rows.map((t: any) => {
     const esc = (v: any) => {
-      const s = String(v ?? "");
+      let s = String(v ?? "");
+
+      // Prevent CSV Formula Injection by escaping fields starting with =, +, -, or @
+      if (/^[=+\-@]/.test(s)) {
+        s = "'" + s;
+      }
+
       if (/[,"\n]/.test(s)) return `"${s.replace(/"/g,'""')}"`;
       return s;
     };
