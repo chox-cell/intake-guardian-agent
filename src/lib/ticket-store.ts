@@ -35,6 +35,10 @@ function dataDir() {
 }
 
 function tenantDir(tenantId: string) {
+  // SECURITY: Prevent path traversal by validating tenantId against allowlist
+  if (!/^[a-zA-Z0-9_-]+$/.test(tenantId)) {
+    throw new Error("Invalid tenantId format");
+  }
   return path.resolve(dataDir(), "tenants", tenantId);
 }
 
