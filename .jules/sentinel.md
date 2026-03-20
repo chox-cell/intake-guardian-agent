@@ -1,0 +1,4 @@
+## 2024-05-24 - [Fix CSV Formula Injection]
+**Vulnerability:** The `ticketsToCsv` function did not properly sanitize input when generating CSVs, failing to escape formula characters (`=`, `+`, `-`, `@`). This leads to a CSV injection vulnerability if the file is imported into spreadsheet software like Excel.
+**Learning:** Spreadsheet applications interpret fields starting with certain characters as formulas. If a user can control this input, they can exploit it to execute arbitrary commands or leak data when a victim opens the exported CSV file.
+**Prevention:** Always prefix user-supplied fields that start with formula injection characters (`=`, `+`, `-`, `@`) with a single quote (`'`) to ensure spreadsheet applications treat the content strictly as text.
