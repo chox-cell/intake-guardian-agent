@@ -1,0 +1,4 @@
+## 2024-05-24 - CSV Injection (Formula Injection) in Export Functionality
+**Vulnerability:** The `ticketsToCsv` functions in `src/lib/ticket-store.ts` and `src/lib/ticket_store.ts` do not sanitize data starting with formula indicators (`=`, `+`, `-`, `@`). This allows attackers to craft ticket fields (e.g. titles, subjects) that execute arbitrary commands when opened in a spreadsheet application like Microsoft Excel.
+**Learning:** Standard CSV escaping (handling commas, quotes, and newlines) is insufficient for spreadsheet applications, which actively evaluate cell contents starting with specific characters as macros or formulas. This is a common gap when exporting user-generated content to CSV.
+**Prevention:** Always prepend a single quote (`'`) to CSV cell values that begin with `=`, `+`, `-`, or `@` to force the spreadsheet application to interpret the cell as text instead of an executable formula.
