@@ -1,0 +1,9 @@
+## 2024-05-18 - CSV Formula Injection
+**Vulnerability:** The CSV export functionality (`ticketsToCsv` in `src/lib/ticket-store.ts` and `src/lib/ticket_store.ts`) did not sanitize field values that started with `=`, `+`, `-`, or `@`. When opened in a spreadsheet application (like Excel), these unescaped values could be interpreted as formulas, leading to arbitrary formula execution (Formula Injection/CSV Injection).
+**Learning:** Even if data is escaped for CSV structural integrity (using quotes around commas/newlines), it must also be sanitized against spreadsheet software behaviors if the output is intended for programs like Excel.
+**Prevention:** Always prepend fields starting with `=`, `+`, `-`, or `@` with a single quote (`'`) during CSV serialization to force spreadsheet applications to treat the field as raw text instead of a formula.
+
+## 2024-05-18 - Path Traversal in Tenant Storage
+**Vulnerability:** The `tenantDir` function in `src/lib/ticket-store.ts` and `src/lib/ticket_store.ts` used an unvalidated `tenantId` string to construct file paths for reading and writing tenant data (`path.join(..., tenantId)` or `path.resolve(..., tenantId)`). If an attacker could control the `tenantId` parameter, they could use `../` sequences to traverse out of the expected directory and potentially read or overwrite unauthorized files on the server.
+**Learning:** Functions that construct file paths from user-provided inputs must strictly validate the input to ensure it only contains allowed characters (e.g., alphanumeric and safe separators) and does not contain directory traversal sequences.
+**Prevention:** Always validate `tenantId` and similar path-determining inputs against a strict regular expression like `/^[a-zA-Z0-9_-]+$/` before using them in file system path construction. Reject any input that does not conform to the expected pattern.
