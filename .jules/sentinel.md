@@ -1,0 +1,4 @@
+## 2025-01-20 - [CRITICAL] Prevent Open Redirect via Host Header Injection
+**Vulnerability:** Base URL construction relies on `X-Forwarded-Host` or `Host` headers without validation. When this dynamically constructed base URL is used for application redirects, an attacker can manipulate the Host header to perform an Open Redirect attack.
+**Learning:** Hardcoding a relative redirect might remove functionality if the application requires deployment at a custom URL base path defined by environment variables (e.g., `APP_BASE_URL`).
+**Prevention:** Always prioritize explicitly trusted configurations (like `process.env.APP_BASE_URL`) before falling back to request headers. If falling back to request headers is necessary to determine the host, rigorously validate the host string against a strict allowlist or regex (e.g., `^[a-zA-Z0-9.-]+(:\d+)?$`) before trusting it to construct a URL.
