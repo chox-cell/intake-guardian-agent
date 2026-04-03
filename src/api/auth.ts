@@ -11,7 +11,8 @@ type AuthOpts = {
 };
 
 type AuthTokenRecord = {
-  token: string;
+  token?: string; // Legacy plaintext token
+  tokenHash?: string; // Secure SHA-256 hash of token
   email: string;
   createdAtUtc: string;
   expiresAtUtc: string;
@@ -132,8 +133,10 @@ export function authRouter(opts?: AuthOpts) {
     const expiresAtUtc = new Date(Date.now() + ttlMin * 60_000).toISOString();
 
     const all = readJson<AuthTokenRecord[]>(tokensJson, []);
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
     all.unshift({
-      token,
+      tokenHash,
+      // SECURITY: Do not store plaintext token, only store its SHA-256 hash
       email,
       createdAtUtc,
       expiresAtUtc,
@@ -171,7 +174,18 @@ This link expires in ${ttlMin} minutes.
     if (!token) return res.status(400).send("missing_token");
 
     const all = readJson<AuthTokenRecord[]>(tokensJson, []);
-    const rec = all.find(x => x && x.token && constantTimeEq(x.token, token));
+    const providedHash = crypto.createHash('sha256').update(token).digest('hex');
+    const rec = all.find(x => {
+      if (!x) return false;
+      // Support legacy tokens if tokenHash is not available
+      if (x.tokenHash) {
+        return constantTimeEq(x.tokenHash, providedHash);
+      }
+      if (x.token) {
+        return constantTimeEq(x.token, token);
+      }
+      return false;
+    });
     if (!rec) return res.status(400).send("invalid_token");
 
     const now = Date.now();
