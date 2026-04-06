@@ -11,7 +11,7 @@ type AuthOpts = {
 };
 
 type AuthTokenRecord = {
-  token: string;
+  tokenHash: string;
   email: string;
   createdAtUtc: string;
   expiresAtUtc: string;
@@ -19,6 +19,10 @@ type AuthTokenRecord = {
   ip?: string;
   ua?: string;
 };
+
+function sha256(v: string) {
+  return crypto.createHash("sha256").update(v).digest("hex");
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -132,8 +136,10 @@ export function authRouter(opts?: AuthOpts) {
     const expiresAtUtc = new Date(Date.now() + ttlMin * 60_000).toISOString();
 
     const all = readJson<AuthTokenRecord[]>(tokensJson, []);
+    // Security fix: Hashing tokens to prevent plaintext token storage in tokens.json
+    const tokenHash = sha256(token);
     all.unshift({
-      token,
+      tokenHash,
       email,
       createdAtUtc,
       expiresAtUtc,
@@ -171,7 +177,8 @@ This link expires in ${ttlMin} minutes.
     if (!token) return res.status(400).send("missing_token");
 
     const all = readJson<AuthTokenRecord[]>(tokensJson, []);
-    const rec = all.find(x => x && x.token && constantTimeEq(x.token, token));
+    const tokenHash = sha256(token);
+    const rec = all.find(x => x && x.tokenHash && constantTimeEq(x.tokenHash, tokenHash));
     if (!rec) return res.status(400).send("invalid_token");
 
     const now = Date.now();
