@@ -54,8 +54,10 @@ function isValidTenantKey(tenantId: string, tenantKey: string): boolean {
 }
 
 function baseUrl(req: any) {
+  if (process.env.APP_BASE_URL) return process.env.APP_BASE_URL;
   const proto = String(req.headers["x-forwarded-proto"] || (req.socket?.encrypted ? "https" : "http"));
-  const host = String(req.headers["x-forwarded-host"] || req.headers.host || "127.0.0.1");
+  let host = String(req.headers["x-forwarded-host"] || req.headers.host || "127.0.0.1");
+  if (!/^[a-zA-Z0-9.-]+(:\d+)?$/.test(host)) host = "127.0.0.1";
   return `${proto}://${host}`;
 }
 
@@ -220,7 +222,7 @@ async function main() {
 
     // redirect back to tickets for zero-tech UX
     const b = baseUrl(req);
-    res.setHeader("location", `${b}/ui/tickets?tenantId=${encodeURIComponent(tenantId)}&k=${encodeURIComponent(k)}`);
+    res.setHeader("location", `/ui/tickets?tenantId=${encodeURIComponent(tenantId)}&k=${encodeURIComponent(k)}`);
     return res.status(303).json({
       ok: true,
       created,

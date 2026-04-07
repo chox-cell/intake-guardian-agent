@@ -2,11 +2,13 @@ import type { Express, Request, Response } from "express";
 import { createTenant, getOrCreateDemoTenant } from "../lib/tenant_registry.js";
 
 function baseUrl(req: Request) {
+  if (process.env.APP_BASE_URL) return process.env.APP_BASE_URL;
   const proto = (req.headers["x-forwarded-proto"] as string) || "http";
-  const host =
+  let host =
     (req.headers["x-forwarded-host"] as string) ||
     (req.headers.host as string) ||
     "127.0.0.1:7090";
+  if (!/^[a-zA-Z0-9.-]+(:\d+)?$/.test(host)) host = "127.0.0.1:7090";
   return `${proto}://${host}`;
 }
 
