@@ -27,8 +27,12 @@ type TenantStore = {
 };
 
 function baseUrlFromReq(req: Request) {
+  if (process.env.APP_BASE_URL) return process.env.APP_BASE_URL;
   const proto = (req.headers["x-forwarded-proto"] as string) || req.protocol || "http";
   const host = (req.headers["x-forwarded-host"] as string) || req.get("host") || "127.0.0.1:7090";
+  if (!/^[a-zA-Z0-9.-]+(:\d+)?$/.test(host)) {
+    return `${proto}://127.0.0.1:7090`; // Fallback to safe host to prevent Host Header Injection
+  }
   return `${proto}://${host}`;
 }
 
