@@ -1,0 +1,4 @@
+## 2024-04-08 - Fix Host Header Injection Vulnerability
+**Vulnerability:** The application was constructing absolute URLs (e.g., links for email verification, webhooks, UI redirects) using the `Host` or `X-Forwarded-Host` HTTP headers from the incoming request without proper validation or fallback.
+**Learning:** This pattern allowed an attacker to inject an arbitrary domain into the `Host` header, causing the server to generate and return URLs pointing to the attacker's server. This could lead to account takeover via password reset poisoning, malicious redirects, or webhook interception.
+**Prevention:** To prevent this, always prioritize explicitly trusted configuration (like `process.env.APP_BASE_URL`) for constructing absolute URLs. When falling back to request headers, strictly validate the host string against a safe regular expression (e.g., `/^[a-zA-Z0-9.-]+(:\d+)?$/`) and provide a safe fallback (e.g., `localhost`) if validation fails.
