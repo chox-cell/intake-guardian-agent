@@ -98,7 +98,10 @@ function computeBaseUrl(req: any, explicit?: string) {
   const proto =
     String(req.headers?.["x-forwarded-proto"] || "") ||
     (req.socket?.encrypted ? "https" : "http");
-  const host = String(req.headers?.["x-forwarded-host"] || req.headers?.host || "localhost");
+  let host = String(req.headers?.["x-forwarded-host"] || req.headers?.host || "localhost");
+  if (!/^[a-zA-Z0-9.-]+(:\d+)?$/.test(host)) {
+    host = "localhost";
+  }
   return `${proto}://${host}`;
 }
 
