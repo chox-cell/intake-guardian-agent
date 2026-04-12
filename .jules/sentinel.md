@@ -1,0 +1,4 @@
+## 2025-01-20 - [Fix Host Header Injection and Open Redirect]
+**Vulnerability:** Host Header Injection via unvalidated `x-forwarded-host` or `host` headers in the `baseUrl` function in `src/server.ts`, and Open Redirect in `/api/ui/send-test-lead` when constructing redirects using the vulnerable `baseUrl` function.
+**Learning:** Constructing absolute URLs for internal redirects or links using unvalidated request headers allows attackers to control the domain, leading to malicious redirects, especially if relative redirects are not explicitly favored or strict regex validation isn't applied.
+**Prevention:** Always validate host headers against strict regex patterns (e.g. `/^[a-zA-Z0-9.-]+(:\d+)?$/`) and use `APP_BASE_URL` if present. Use relative paths for internal redirects (`res.setHeader('location', '/path')`) rather than constructing absolute URLs based on user-supplied or proxy headers.
