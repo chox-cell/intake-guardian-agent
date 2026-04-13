@@ -12,9 +12,11 @@ function htmlEscape(s: string) {
 }
 
 function baseUrl(req: Request) {
+  if (process.env.APP_BASE_URL) return process.env.APP_BASE_URL;
   const proto = String((req.headers["x-forwarded-proto"] as any) || ((req.socket as any).encrypted ? "https" : "http"));
   const host = String((req.headers["x-forwarded-host"] as any) || req.headers.host || "127.0.0.1");
-  return `${proto}://${host}`;
+  const validHost = /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host) ? host : "127.0.0.1";
+  return `${proto}://${validHost}`;
 }
 
 function link(req: Request, path: string, tenantId: string, k: string) {

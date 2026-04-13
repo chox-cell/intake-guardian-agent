@@ -54,9 +54,11 @@ function isValidTenantKey(tenantId: string, tenantKey: string): boolean {
 }
 
 function baseUrl(req: any) {
+  if (process.env.APP_BASE_URL) return process.env.APP_BASE_URL;
   const proto = String(req.headers["x-forwarded-proto"] || (req.socket?.encrypted ? "https" : "http"));
   const host = String(req.headers["x-forwarded-host"] || req.headers.host || "127.0.0.1");
-  return `${proto}://${host}`;
+  const validHost = /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host) ? host : "127.0.0.1";
+  return `${proto}://${validHost}`;
 }
 
 function mkTenantId() {
