@@ -99,7 +99,8 @@ function computeBaseUrl(req: any, explicit?: string) {
     String(req.headers?.["x-forwarded-proto"] || "") ||
     (req.socket?.encrypted ? "https" : "http");
   const host = String(req.headers?.["x-forwarded-host"] || req.headers?.host || "localhost");
-  return `${proto}://${host}`;
+  const validHost = /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host) ? host : "localhost";
+  return `${proto}://${validHost}`;
 }
 
 function authStorePaths(dataDirAbs: string) {
