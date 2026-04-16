@@ -24,6 +24,10 @@ function dataDir() {
 }
 
 function tenantDir(tenantId: string) {
+  // SECURITY: Prevent path traversal by ensuring tenantId is strictly alphanumeric/dashes/underscores
+  if (!/^[a-zA-Z0-9_-]+$/.test(tenantId)) {
+    throw new Error("Invalid tenantId format");
+  }
   return path.join(dataDir(), "tenants", tenantId);
 }
 
