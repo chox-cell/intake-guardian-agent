@@ -1,0 +1,4 @@
+## 2026-04-17 - [CSV Injection Vulnerability in Ticket Export]
+**Vulnerability:** The application was vulnerable to CSV injection (formula injection) in ticket exports across multiple ticket store implementations (`src/lib/ticket-store.ts`, `src/lib/ticket_store.ts`, `src/lib/tickets_store.ts`). User-provided data was not sanitized for spreadsheet formulas before being exported to CSV.
+**Learning:** We need to sanitize fields in CSV exports that begin with formula characters (`=`, `+`, `-`, `@`) because spreadsheet software (like Excel or Google Sheets) might execute them automatically when the CSV is opened, potentially leading to remote code execution or data exfiltration on the end user's machine.
+**Prevention:** Always prepend a single quote (`'`) to fields in CSV exports if they start with `=`, `+`, `-`, or `@`. This forces the spreadsheet software to treat the value as text instead of a formula.
