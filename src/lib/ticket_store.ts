@@ -115,7 +115,11 @@ export async function updateTicket(
 }
 
 function csvEscape(v: string) {
-  const s = (v ?? "").toString();
+  let s = (v ?? "").toString();
+  // Prevent CSV formula injection by prepending a single quote to fields starting with =, +, -, or @
+  if (/^[=+\-@]/.test(s)) {
+    s = "'" + s;
+  }
   if (s.includes('"') || s.includes(",") || s.includes("\n") || s.includes("\r")) {
     return `"${s.replaceAll('"', '""')}"`;
   }

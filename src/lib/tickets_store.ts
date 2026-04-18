@@ -244,7 +244,11 @@ export function addEvidence(tenantId: string, ticketId: string, ev: Omit<TicketE
 export function exportCsv(tenantId: string): string {
   const tickets = listTickets(tenantId);
   const esc = (v: any) => {
-    const s = String(v ?? "");
+    let s = String(v ?? "");
+    // Prevent CSV formula injection by prepending a single quote to fields starting with =, +, -, or @
+    if (/^[=+\-@]/.test(s)) {
+      s = "'" + s;
+    }
     if (/[,"\n]/.test(s)) return `"${s.replace(/"/g,'""')}"`;
     return s;
   };
