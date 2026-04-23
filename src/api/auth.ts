@@ -11,7 +11,7 @@ type AuthOpts = {
 };
 
 type AuthTokenRecord = {
-  token: string;
+  tokenHash: string;
   email: string;
   createdAtUtc: string;
   expiresAtUtc: string;
@@ -40,6 +40,10 @@ function readJson<T>(p: string, fallback: T): T {
 function writeJson(p: string, obj: unknown) {
   safeMkdir(path.dirname(p));
   fs.writeFileSync(p, JSON.stringify(obj, null, 2), "utf8");
+}
+
+function hashToken(token: string) {
+  return crypto.createHash("sha256").update(token).digest("hex");
 }
 
 function randToken(len = 32) {
@@ -133,7 +137,7 @@ export function authRouter(opts?: AuthOpts) {
 
     const all = readJson<AuthTokenRecord[]>(tokensJson, []);
     all.unshift({
-      token,
+      tokenHash: hashToken(token),
       email,
       createdAtUtc,
       expiresAtUtc,
@@ -171,7 +175,8 @@ This link expires in ${ttlMin} minutes.
     if (!token) return res.status(400).send("missing_token");
 
     const all = readJson<AuthTokenRecord[]>(tokensJson, []);
-    const rec = all.find(x => x && x.token && constantTimeEq(x.token, token));
+    const hashedInput = hashToken(token);
+    const rec = all.find(x => x && x.tokenHash && constantTimeEq(x.tokenHash, hashedInput));
     if (!rec) return res.status(400).send("invalid_token");
 
     const now = Date.now();
