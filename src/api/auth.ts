@@ -197,8 +197,13 @@ This link expires in ${ttlMin} minutes.
       dataDirAbs
     );
 
-    const baseUrl = computeBaseUrl(req, opts?.appBaseUrl || process.env.APP_BASE_URL);
-    const dest = `${baseUrl}/ui/welcome?tenantId=${encodeURIComponent(tenantId)}&k=${encodeURIComponent(tenantKey)}`;
+    const explicitBaseUrl = opts?.appBaseUrl || process.env.APP_BASE_URL;
+    let dest = `/ui/welcome?tenantId=${encodeURIComponent(tenantId)}&k=${encodeURIComponent(tenantKey)}`;
+    // Only use an absolute URL for redirect if an explicitly trusted base URL is configured
+    if (explicitBaseUrl && String(explicitBaseUrl).trim()) {
+      dest = `${String(explicitBaseUrl).trim()}${dest}`;
+    }
+
     res.setHeader("Cache-Control", "no-store");
     return res.redirect(302, dest);
   });
