@@ -1,0 +1,4 @@
+## 2025-02-21 - [CRITICAL] Open Redirect in Auth Flow
+**Vulnerability:** The `/api/auth/verify` endpoint redirected users with sensitive `tenantKey` values as URL parameters via dynamically constructed absolute URLs using `req.headers.host`, enabling Open Redirects that could leak these credentials to attacker-controlled servers.
+**Learning:** Constructing redirect destinations using unvalidated request headers (e.g. `Host`, `X-Forwarded-Host`) introduces systemic vulnerabilities. Open Redirects combined with sensitive query parameters become extremely critical credential leaks.
+**Prevention:** Use relative paths for internal redirects whenever possible to guarantee the user remains on the same origin, mitigating the risk of Open Redirect completely without needing complex header validation.
