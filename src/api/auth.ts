@@ -11,7 +11,8 @@ type AuthOpts = {
 };
 
 type AuthTokenRecord = {
-  token: string;
+  token?: string;
+  tokenHash?: string;
   email: string;
   createdAtUtc: string;
   expiresAtUtc: string;
@@ -131,9 +132,10 @@ export function authRouter(opts?: AuthOpts) {
     const createdAtUtc = nowIso();
     const expiresAtUtc = new Date(Date.now() + ttlMin * 60_000).toISOString();
 
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
     const all = readJson<AuthTokenRecord[]>(tokensJson, []);
     all.unshift({
-      token,
+      tokenHash,
       email,
       createdAtUtc,
       expiresAtUtc,
@@ -170,8 +172,9 @@ This link expires in ${ttlMin} minutes.
     const token = String((req.query as any)?.token || "").trim();
     if (!token) return res.status(400).send("missing_token");
 
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
     const all = readJson<AuthTokenRecord[]>(tokensJson, []);
-    const rec = all.find(x => x && x.token && constantTimeEq(x.token, token));
+    const rec = all.find(x => x && ((x.tokenHash && constantTimeEq(x.tokenHash, tokenHash)) || (x.token && constantTimeEq(x.token, token))));
     if (!rec) return res.status(400).send("invalid_token");
 
     const now = Date.now();
@@ -198,7 +201,9 @@ This link expires in ${ttlMin} minutes.
     );
 
     const baseUrl = computeBaseUrl(req, opts?.appBaseUrl || process.env.APP_BASE_URL);
-    const dest = `${baseUrl}/ui/welcome?tenantId=${encodeURIComponent(tenantId)}&k=${encodeURIComponent(tenantKey)}`;
+    const hostStr = String(req.headers?.host || "");
+    const safeBaseUrl = baseUrl.includes(hostStr) ? "" : baseUrl;
+    const dest = `${safeBaseUrl}/ui/welcome?tenantId=${encodeURIComponent(tenantId)}&k=${encodeURIComponent(tenantKey)}`;
     res.setHeader("Cache-Control", "no-store");
     return res.redirect(302, dest);
   });
