@@ -404,15 +404,20 @@ try {
     }
 
     const items = await safeList(args.store, tenantId, {});
+    const csvEscape = (v: any) => {
+      let s = String(v ?? "");
+      if (/^[=+\-@]/.test(s)) s = "'" + s;
+      return s.replaceAll('"', '""');
+    };
     const lines = [
       ["id","subject","from","status","priority","due"].join(","),
       ...(items || []).map((it: any) => {
-        const id = (it.id || it.ticketId || it.workItemId || "");
-        const subject = (it.subject || it.title || "").replaceAll('"','""');
-        const from = (it.from || it.sender || "").replaceAll('"','""');
-        const status = (it.status || "new");
-        const priority = (it.priority || "normal");
-        const due = (it.dueAt || it.due || it.slaDue || it.sla || "");
+        const id = csvEscape(it.id || it.ticketId || it.workItemId || "");
+        const subject = csvEscape(it.subject || it.title || "");
+        const from = csvEscape(it.from || it.sender || "");
+        const status = csvEscape(it.status || "new");
+        const priority = csvEscape(it.priority || "normal");
+        const due = csvEscape(it.dueAt || it.due || it.slaDue || it.sla || "");
         return `"${id}","${subject}","${from}","${status}","${priority}","${due}"`;
       })
     ].join("\n");

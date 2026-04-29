@@ -1,0 +1,4 @@
+## 2025-04-28 - [Mitigate CSV Formula Injection]
+**Vulnerability:** Found multiple instances of CSV export logic (`toCSV`, `ticketsToCsv`, `exportCsv`, `csvEscape`, `toCsvCell`) across various UI and lib files lacking mitigation for CSV injection (Formula Injection) vulnerabilities. Fields in CSV could start with characters like `=`, `+`, `-`, or `@`, causing executing formulas in applications like Excel.
+**Learning:** Hardcoded CSV export scripts typically join string directly but ignore leading formula execution triggers.
+**Prevention:** Always prepend a single quote (`'`) to strings that begin with `=`, `+`, `-`, or `@` during string construction/escaping phase of CSV exports to ensure Excel and other spreadsheet applications interpret them as strings instead of potentially dangerous formulas.
