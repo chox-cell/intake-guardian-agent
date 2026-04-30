@@ -11,7 +11,8 @@ type AuthOpts = {
 };
 
 type AuthTokenRecord = {
-  token: string;
+  tokenHash?: string;
+  token?: string; // legacy fallback
   email: string;
   createdAtUtc: string;
   expiresAtUtc: string;
@@ -131,9 +132,11 @@ export function authRouter(opts?: AuthOpts) {
     const createdAtUtc = nowIso();
     const expiresAtUtc = new Date(Date.now() + ttlMin * 60_000).toISOString();
 
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+
     const all = readJson<AuthTokenRecord[]>(tokensJson, []);
     all.unshift({
-      token,
+      tokenHash,
       email,
       createdAtUtc,
       expiresAtUtc,
@@ -170,8 +173,15 @@ This link expires in ${ttlMin} minutes.
     const token = String((req.query as any)?.token || "").trim();
     if (!token) return res.status(400).send("missing_token");
 
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+
     const all = readJson<AuthTokenRecord[]>(tokensJson, []);
-    const rec = all.find(x => x && x.token && constantTimeEq(x.token, token));
+    const rec = all.find(x => {
+      if (!x) return false;
+      if (x.tokenHash) return constantTimeEq(x.tokenHash, tokenHash);
+      if (x.token) return constantTimeEq(x.token, token);
+      return false;
+    });
     if (!rec) return res.status(400).send("invalid_token");
 
     const now = Date.now();
