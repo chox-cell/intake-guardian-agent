@@ -11,7 +11,7 @@ type AuthOpts = {
 };
 
 type AuthTokenRecord = {
-  token: string;
+  tokenHash: string;
   email: string;
   createdAtUtc: string;
   expiresAtUtc: string;
@@ -50,6 +50,10 @@ function randToken(len = 32) {
 function randKey(len = 32) {
   // tenant key must be stable and url-safe
   return crypto.randomBytes(len).toString("base64url").slice(0, len);
+}
+
+function hashToken(t: string) {
+  return crypto.createHash("sha256").update(t).digest("hex");
 }
 
 function constantTimeEq(a: string, b: string) {
@@ -133,7 +137,7 @@ export function authRouter(opts?: AuthOpts) {
 
     const all = readJson<AuthTokenRecord[]>(tokensJson, []);
     all.unshift({
-      token,
+      tokenHash: hashToken(token),
       email,
       createdAtUtc,
       expiresAtUtc,
@@ -171,7 +175,8 @@ This link expires in ${ttlMin} minutes.
     if (!token) return res.status(400).send("missing_token");
 
     const all = readJson<AuthTokenRecord[]>(tokensJson, []);
-    const rec = all.find(x => x && x.token && constantTimeEq(x.token, token));
+    const th = hashToken(token);
+    const rec = all.find(x => x && x.tokenHash && constantTimeEq(x.tokenHash, th));
     if (!rec) return res.status(400).send("invalid_token");
 
     const now = Date.now();
