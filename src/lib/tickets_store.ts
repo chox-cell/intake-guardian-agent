@@ -244,7 +244,10 @@ export function addEvidence(tenantId: string, ticketId: string, ev: Omit<TicketE
 export function exportCsv(tenantId: string): string {
   const tickets = listTickets(tenantId);
   const esc = (v: any) => {
-    const s = String(v ?? "");
+    let s = String(v ?? "");
+    if (s.startsWith("=") || s.startsWith("+") || s.startsWith("-") || s.startsWith("@")) {
+      s = "'" + s;
+    }
     if (/[,"\n]/.test(s)) return `"${s.replace(/"/g,'""')}"`;
     return s;
   };

@@ -137,7 +137,10 @@ export function ticketsToCsv(rows: any[]): string {
   const header = ["id","status","source","type","title","createdAtUtc","evidenceHash"].join(",");
   const lines = rows.map((t: any) => {
     const esc = (v: any) => {
-      const s = String(v ?? "");
+      let s = String(v ?? "");
+      if (s.startsWith("=") || s.startsWith("+") || s.startsWith("-") || s.startsWith("@")) {
+        s = "'" + s;
+      }
       if (/[,"\n]/.test(s)) return `"${s.replace(/"/g,'""')}"`;
       return s;
     };
