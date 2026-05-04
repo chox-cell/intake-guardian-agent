@@ -20,7 +20,10 @@ function toCSV(rows: Record<string, any>[]) {
   const head = cols.join(",");
   const body = rows.map(r => cols.map(c => {
     const v = r[c];
-    const str = String(v ?? "");
+    let str = String(v ?? "");
+    if (str.startsWith("=") || str.startsWith("+") || str.startsWith("-") || str.startsWith("@")) {
+      str = "'" + str;
+    }
     const q = str.includes(",") || str.includes('"') || str.includes("\n");
     return q ? `"${str.replaceAll('"', '""')}"` : str;
   }).join(",")).join("\n");
