@@ -1,0 +1,4 @@
+## 2025-05-11 - CSV Injection (Formula Injection) in CSV Exports
+**Vulnerability:** Multiple CSV export functions (`toCSV`, `toCsvCell`, `csvEscape`, inline functions) did not sanitize data fields starting with formula characters (`=`, `+`, `-`, `@`), leading to potential CSV/Formula Injection vulnerabilities when exported data is opened in spreadsheet applications.
+**Learning:** Security fixes must be applied comprehensively across a codebase; duplicating CSV export logic without centralized sanitization led to multiple points of vulnerability.
+**Prevention:** All CSV export logic must escape fields starting with `=`, `+`, `-`, or `@` by prepending a single quote (`'`). Ideally, use a single robust, vetted library or centralized utility function for all CSV generation to prevent scattered vulnerabilities.
