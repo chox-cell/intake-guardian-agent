@@ -1,0 +1,4 @@
+## 2025-01-09 - Fix Open Redirect via Host Header Injection
+**Vulnerability:** Constructing redirect URLs directly from unvalidated `Host` or `X-Forwarded-Host` headers allows attackers to trick users into navigating to malicious sites (Open Redirect) and can enable Host Header Injection attacks.
+**Learning:** Hardcoding strictly local allowlists (like enforcing `localhost` only) breaks cross-domain/decoupled configurations in production setups relying on explicit `APP_BASE_URL`. Absolute URLs are not required for internal redirects.
+**Prevention:** Always use relative paths for internal redirects (e.g., `res.redirect('/path')`). When explicit base URLs are required for decoupled frontends, conditionally strip the base URL if it matches the request host (`baseUrl.includes(hostStr) ? '' : baseUrl`) to safely fall back to relative paths for same-origin requests.

@@ -19,7 +19,7 @@ export function mountStart(app: Express) {
     if (!isAdminOk(req)) return res.status(401).send("unauthorized");
     const tenant = await getOrCreateDemoTenant();
     const url =
-      `${baseUrl(req)}/ui/setup?tenantId=${tenant.tenantId}` +
+      `/ui/setup?tenantId=${tenant.tenantId}` +
       `&k=${tenant.tenantKey}`;
     res.redirect(302, url);
   });
