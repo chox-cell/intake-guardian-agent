@@ -45,7 +45,11 @@ export function writeMinimalEvidence(packDir: string, tenantId: string, tickets:
     t.createdAtUtc ?? "",
     t.lastSeenAtUtc ?? "",
     String(t.duplicateCount ?? 0),
-  ].map(v => `"${String(v)}"`).join(","));
+  ].map(v => {
+    let s = String(v);
+    if (/^[=+\-@]/.test(s)) s = "'" + s;
+    return `"${s}"`;
+  }).join(","));
   fs.writeFileSync(ticketsCsvPath, [header, ...rows].join("\n") + "\n", "utf8");
 
   // manifest.json
