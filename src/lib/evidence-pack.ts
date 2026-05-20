@@ -22,7 +22,14 @@ function toCsv(rows: any[]): string {
       (r.title ?? "").toString().replace(/"/g,'""'),
       r.createdAtUtc ?? "",
       r.evidenceHash ?? ""
-    ].map((v) => `"${String(v)}"`).join(",");
+    ].map((v) => {
+      let str = String(v);
+      // Prevent CSV formula injection
+      if (/^[=+\-@]/.test(str)) {
+        str = "'" + str;
+      }
+      return `"${str}"`;
+    }).join(",");
     out.push(line);
   }
   return out.join("\n") + "\n";
