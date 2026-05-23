@@ -42,6 +42,7 @@ function dataDir(): string {
 }
 
 function tenantDir(tenantId: string): string {
+  if (!/^[a-zA-Z0-9_-]+$/.test(tenantId)) throw new Error("invalid_tenantId");
   return path.join(dataDir(), "tenants", tenantId);
 }
 
