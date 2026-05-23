@@ -52,6 +52,7 @@ function dataDirFromEnv(): string {
 }
 
 function tenantDir(tenantId: string): string {
+  if (!/^[a-zA-Z0-9_-]+$/.test(tenantId)) throw new Error("invalid_tenantId");
   return path.join(dataDirFromEnv(), "tenants", tenantId);
 }
 
