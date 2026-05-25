@@ -11,7 +11,8 @@ type AuthOpts = {
 };
 
 type AuthTokenRecord = {
-  token: string;
+  tokenHash: string;
+  token?: string;
   email: string;
   createdAtUtc: string;
   expiresAtUtc: string;
@@ -128,12 +129,13 @@ export function authRouter(opts?: AuthOpts) {
 
     const ttlMin = Number(process.env.AUTH_TOKEN_TTL_MINUTES || 30);
     const token = randToken(24);
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
     const createdAtUtc = nowIso();
     const expiresAtUtc = new Date(Date.now() + ttlMin * 60_000).toISOString();
 
     const all = readJson<AuthTokenRecord[]>(tokensJson, []);
     all.unshift({
-      token,
+      tokenHash,
       email,
       createdAtUtc,
       expiresAtUtc,
@@ -171,7 +173,13 @@ This link expires in ${ttlMin} minutes.
     if (!token) return res.status(400).send("missing_token");
 
     const all = readJson<AuthTokenRecord[]>(tokensJson, []);
-    const rec = all.find(x => x && x.token && constantTimeEq(x.token, token));
+    const inputTokenHash = crypto.createHash("sha256").update(token).digest("hex");
+    const rec = all.find(x => {
+      if (!x) return false;
+      if (x.tokenHash) return constantTimeEq(x.tokenHash, inputTokenHash);
+      if (x.token) return constantTimeEq(x.token, token);
+      return false;
+    });
     if (!rec) return res.status(400).send("invalid_token");
 
     const now = Date.now();
