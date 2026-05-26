@@ -197,8 +197,10 @@ This link expires in ${ttlMin} minutes.
       dataDirAbs
     );
 
-    const baseUrl = computeBaseUrl(req, opts?.appBaseUrl || process.env.APP_BASE_URL);
-    const dest = `${baseUrl}/ui/welcome?tenantId=${encodeURIComponent(tenantId)}&k=${encodeURIComponent(tenantKey)}`;
+    // Prevent Host Header Injection / Open Redirect: Prefer relative paths unless explicit base URL is trusted
+    const explicitBase = opts?.appBaseUrl || process.env.APP_BASE_URL;
+    const destBase = explicitBase ? String(explicitBase).trim() : "";
+    const dest = `${destBase}/ui/welcome?tenantId=${encodeURIComponent(tenantId)}&k=${encodeURIComponent(tenantKey)}`;
     res.setHeader("Cache-Control", "no-store");
     return res.redirect(302, dest);
   });

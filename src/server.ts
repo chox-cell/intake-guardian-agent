@@ -219,8 +219,10 @@ async function main() {
     const apiStatus = missing.length ? "needs_review" : "ready";
 
     // redirect back to tickets for zero-tech UX
-    const b = baseUrl(req);
-    res.setHeader("location", `${b}/ui/tickets?tenantId=${encodeURIComponent(tenantId)}&k=${encodeURIComponent(k)}`);
+    // Prevent Host Header Injection / Open Redirect: Prefer relative paths unless explicit base URL is trusted
+    const explicitBase = process.env.APP_BASE_URL;
+    const destBase = explicitBase ? String(explicitBase).trim() : "";
+    res.setHeader("location", `${destBase}/ui/tickets?tenantId=${encodeURIComponent(tenantId)}&k=${encodeURIComponent(k)}`);
     return res.status(303).json({
       ok: true,
       created,
