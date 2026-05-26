@@ -18,8 +18,12 @@ export function mountStart(app: Express) {
   app.get("/ui/start", async (req: Request, res: Response) => {
     if (!isAdminOk(req)) return res.status(401).send("unauthorized");
     const tenant = await getOrCreateDemoTenant();
+
+    // Prevent Host Header Injection / Open Redirect: Prefer relative paths unless explicit base URL is trusted
+    const explicitBase = process.env.APP_BASE_URL;
+    const destBase = explicitBase ? String(explicitBase).trim() : "";
     const url =
-      `${baseUrl(req)}/ui/setup?tenantId=${tenant.tenantId}` +
+      `${destBase}/ui/setup?tenantId=${tenant.tenantId}` +
       `&k=${tenant.tenantKey}`;
     res.redirect(302, url);
   });
