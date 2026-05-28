@@ -105,6 +105,12 @@ export function mountDecisionApi(app: Express) {
 
     const { tenantId } = a;
     const packId = String(req.params.packId || "");
+
+    // Prevent path traversal by strictly validating packId
+    if (!/^[a-zA-Z0-9_-]+$/.test(packId)) {
+      return res.status(400).json({ ok: false, error: "invalid_pack_id" });
+    }
+
     const dir = path.join(dataDir(), "decision_cover", "packs");
     const f = path.join(dir, `${packId}.zip`);
     if (!fs.existsSync(f)) return res.status(404).json({ ok: false, error: "pack_not_found" });
