@@ -1,8 +1,14 @@
 import type { Express, Request, Response } from "express";
+import crypto from "node:crypto";
 import { createTenant, listTenants, rotateTenantKey, getTenant } from "../lib/tenant_registry.js";
 
 const DATA_DIR = process.env.DATA_DIR || "./data";
 
+function secureCompare(a: string, b: string): boolean {
+  const hashA = crypto.createHash("sha256").update(a).digest();
+  const hashB = crypto.createHash("sha256").update(b).digest();
+  return crypto.timingSafeEqual(hashA, hashB);
+}
 
 function adminKeyOk(req: Request) {
   const expected = process.env.ADMIN_KEY || "";
@@ -11,7 +17,11 @@ function adminKeyOk(req: Request) {
   const h = (req.headers["x-admin-key"] as string) || "";
   const a = (req.headers["authorization"] as string) || "";
   const bearer = a.toLowerCase().startsWith("bearer ") ? a.slice(7) : "";
-  return q === expected || h === expected || bearer === expected;
+
+  if (q && secureCompare(q, expected)) return true;
+  if (h && secureCompare(h, expected)) return true;
+  if (bearer && secureCompare(bearer, expected)) return true;
+  return false;
 }
 
 function deny(res: Response, code = 401, msg = "unauthorized") {
