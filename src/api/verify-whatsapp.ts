@@ -16,9 +16,8 @@ export function verifyWhatsAppSignature(req: RawBodyRequest): { ok: true } | { o
 
   const expected = "sha256=" + crypto.createHmac("sha256", secret).update(raw).digest("hex");
 
-  const a = Buffer.from(expected);
-  const b = Buffer.from(header);
-  if (a.length !== b.length) return enforce ? { ok: false, error: "invalid_whatsapp_signature" } : { ok: true };
+  const a = crypto.createHash("sha256").update(String(expected)).digest();
+  const b = crypto.createHash("sha256").update(String(header)).digest();
 
   const ok = crypto.timingSafeEqual(a, b);
   return ok ? { ok: true } : (enforce ? { ok: false, error: "invalid_whatsapp_signature" } : { ok: true });
