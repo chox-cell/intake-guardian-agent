@@ -54,9 +54,8 @@ function randKey(len = 32) {
 
 function constantTimeEq(a: string, b: string) {
   try {
-    const ab = Buffer.from(a);
-    const bb = Buffer.from(b);
-    if (ab.length !== bb.length) return false;
+    const ab = crypto.createHash("sha256").update(String(a)).digest();
+    const bb = crypto.createHash("sha256").update(String(b)).digest();
     return crypto.timingSafeEqual(ab, bb);
   } catch {
     return false;

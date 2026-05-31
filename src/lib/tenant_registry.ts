@@ -107,9 +107,8 @@ function canonicalPath(dataDirAbs: string) {
 
 function constantTimeEq(a: string, b: string) {
   try {
-    const aa = Buffer.from(String(a));
-    const bb = Buffer.from(String(b));
-    if (aa.length !== bb.length) return false;
+    const aa = crypto.createHash("sha256").update(String(a)).digest();
+    const bb = crypto.createHash("sha256").update(String(b)).digest();
     return crypto.timingSafeEqual(aa, bb);
   } catch {
     return false;
